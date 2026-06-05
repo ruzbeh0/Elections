@@ -1,0 +1,760 @@
+.root {
+  position: relative;
+  pointer-events: auto;
+}
+
+.icon {
+  width: 100%;
+  height: 100%;
+}
+
+.panel {
+  position: absolute;
+  top: 42rem;
+  left: 0;
+  width: 693rem;
+  max-width: calc(100vw - 24rem);
+  max-height: 760rem;
+  max-height: calc(100vh - 110rem);
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  z-index: 20;
+  background-color: var(--panelColorNormal);
+  backdrop-filter: var(--panelBlur);
+  border-radius: var(--panelRadiusInner);
+  box-shadow: 0 8rem 24rem rgba(0, 0, 0, 0.32);
+  color: var(--menuText1Normal);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42rem;
+  padding: 7rem 10rem;
+  border-bottom: 2rem solid var(--accentColorNormal);
+  background-color: var(--sectionHeaderColor);
+}
+
+.titleBlock {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.title {
+  font-size: var(--fontSizeL);
+  font-weight: 700;
+  color: var(--accentColorNormal);
+  text-transform: uppercase;
+}
+
+.subtitle {
+  font-size: var(--fontSizeS);
+  color: var(--menuText2Normal);
+  white-space: nowrap;
+}
+
+.headerActions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6rem;
+  margin-left: 8rem;
+}
+
+.votingLocationsButton {
+  width: auto;
+  height: 30rem;
+  min-width: 30rem;
+  min-height: 30rem;
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5rem;
+  padding: 4rem 8rem;
+  border-radius: 4rem;
+  border: 1rem solid rgba(126, 196, 255, 0.58);
+  outline: none;
+  background: rgba(36, 132, 226, 0.68);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.ballotIcon {
+  width: 20rem;
+  height: 20rem;
+  flex: 0 0 20rem;
+  color: inherit;
+  fill: none !important;
+  stroke: currentColor !important;
+  stroke-width: 1.8 !important;
+  stroke-linecap: round !important;
+  stroke-linejoin: round !important;
+}
+
+.ballotIcon path {
+  fill: none !important;
+  stroke: currentColor !important;
+}
+
+.votingLocationsButtonLabel {
+  flex: 0 0 auto;
+  margin-left: 5rem;
+  color: inherit;
+  font-size: var(--fontSizeS);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.votingLocationsButton:hover {
+  color: #ffffff;
+  border-color: rgba(170, 218, 255, 0.84);
+  background: rgba(52, 154, 238, 0.86);
+}
+
+.votingLocationsButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.votingLocationsButtonActive {
+  color: #ffffff;
+  border-color: rgba(148, 207, 255, 0.86);
+  background: rgba(36, 132, 226, 0.98);
+  box-shadow: 0 0 0 1rem rgba(90, 174, 255, 0.22);
+}
+
+.topLevel {
+  display: flex;
+  align-items: stretch;
+  gap: 8rem;
+  padding: 10rem;
+  border-bottom: 1rem solid var(--dividerColor);
+}
+
+.scheduleCard,
+.mayorCard {
+  min-width: 0;
+  padding: 10rem;
+  border-radius: 6rem;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.scheduleCard {
+  flex: 1.35 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rem;
+}
+
+.summaryText {
+  font-size: var(--fontSizeM);
+  line-height: 1.25;
+}
+
+.metaGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6rem;
+}
+
+.infoItem {
+  min-width: 0;
+  padding: 6rem;
+  border-radius: 4rem;
+  background-color: rgba(0, 0, 0, 0.12);
+}
+
+.infoItem span,
+.sectionHeader span,
+.donationHeader span {
+  display: block;
+  font-size: var(--fontSizeS);
+  color: var(--menuText2Normal);
+}
+
+.infoItem strong {
+  display: block;
+  margin-top: 2rem;
+  font-size: var(--fontSizeS);
+  font-weight: 700;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+}
+
+.notice {
+  padding: 8rem 10rem;
+  font-size: var(--fontSizeS);
+  color: var(--menuText2Normal);
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.candidateGrid {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 10rem 8rem;
+  overflow: visible;
+}
+
+.candidateCard {
+  min-width: 0;
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rem;
+  padding: 8rem;
+  border: 2rem solid rgba(255, 255, 255, 0.1);
+  border-radius: 6rem;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.candidateCardA {
+  margin-right: 5rem;
+  border-color: rgba(177, 108, 255, 0.82);
+  box-shadow: inset 0 0 0 1rem rgba(177, 108, 255, 0.18);
+}
+
+.candidateCardB {
+  margin-left: 5rem;
+  border-color: rgba(98, 210, 111, 0.82);
+  box-shadow: inset 0 0 0 1rem rgba(98, 210, 111, 0.16);
+}
+
+.candidateHeader {
+  display: flex;
+  align-items: center;
+  gap: 8rem;
+  min-height: 52rem;
+}
+
+.portrait {
+  width: 48rem;
+  height: 48rem;
+  flex: 0 0 48rem;
+  border-radius: 4rem;
+  object-fit: cover;
+  background-color: var(--dividerColor);
+}
+
+.candidateTitle {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3rem;
+}
+
+.candidateNameLink {
+  width: 100%;
+  min-height: 30rem;
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding: 2rem 0;
+  background-color: transparent;
+  color: var(--accentColorNormal);
+  font-size: var(--fontSizeM);
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.candidateNameLink:hover {
+  text-decoration: underline;
+}
+
+.candidateBio {
+  margin-top: 2rem;
+  color: var(--menuText2Normal);
+  font-size: var(--fontSizeS);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.donationTotal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8rem;
+  min-height: 30rem;
+  padding: 5rem 7rem;
+  border-radius: 4rem;
+  background-color: rgba(0, 0, 0, 0.14);
+  font-size: var(--fontSizeS);
+  color: var(--menuText2Normal);
+  line-height: 1.15;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.donationTotal strong {
+  min-width: 0;
+  flex: 0 1 auto;
+  color: var(--accentColorNormal);
+  font-size: var(--fontSizeM);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platform {
+  min-height: 52rem;
+}
+
+.platform > span {
+  display: block;
+  margin-bottom: 4rem;
+  font-size: var(--fontSizeS);
+  font-weight: 700;
+  color: var(--accentColorNormal);
+}
+
+.platform p {
+  margin: 0;
+  font-size: var(--fontSizeS);
+  line-height: 1.25;
+  color: var(--menuText1Normal);
+}
+
+.platformImpactList {
+  display: flex;
+  flex-direction: column;
+  gap: 3rem;
+  margin-bottom: 5rem;
+}
+
+.platformImpact {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 5rem;
+  font-size: var(--fontSizeS);
+  line-height: 1.2;
+}
+
+.platformImpact strong {
+  flex: 0 0 auto;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.platformImpact span {
+  min-width: 0;
+  color: var(--menuText1Normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platformImpact .platformValuePositive {
+  color: #62d26f !important;
+  -webkit-text-fill-color: #62d26f;
+}
+
+.platformImpact .platformValueNegative {
+  color: #ff6b6b !important;
+  -webkit-text-fill-color: #ff6b6b;
+}
+
+.donationBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 5rem;
+}
+
+.donationHeader {
+  min-height: 24rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6rem;
+}
+
+.donationHeader strong {
+  flex: 0 0 auto;
+  font-size: var(--fontSizeS);
+  color: var(--positiveColor);
+}
+
+.tierGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4rem;
+}
+
+.tierSlot {
+  min-width: 0;
+}
+
+.tierButton {
+  width: 100%;
+  min-height: 30rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 4rem;
+  border-radius: 4rem;
+  font-size: var(--fontSizeS);
+}
+
+.tierButton strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tierButtonDisabled {
+  opacity: 0.45;
+}
+
+.helpText {
+  min-height: 16rem;
+  font-size: var(--fontSizeS);
+  color: var(--menuText2Normal);
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8rem;
+}
+
+.sectionHeader strong {
+  min-width: 0;
+  flex: 0 0 auto;
+  font-size: var(--fontSizeS);
+  color: var(--menuText2Normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pollBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8rem;
+  padding-top: 8rem;
+  border-top: 1rem solid var(--dividerColor);
+}
+
+.pollHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8rem;
+}
+
+.pollHeader span {
+  display: block;
+  font-size: var(--fontSizeS);
+  color: var(--menuText2Normal);
+}
+
+.pollSample {
+  flex: 0 0 auto;
+  padding: 3rem 6rem;
+  border-radius: 4rem;
+  background-color: rgba(0, 0, 0, 0.16);
+  color: var(--menuText1Normal);
+  font-size: var(--fontSizeS);
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.pollRows {
+  display: flex;
+  flex-direction: column;
+  gap: 8rem;
+}
+
+.pollReadout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8rem;
+  padding: 7rem;
+  border-radius: 4rem;
+  background-color: rgba(0, 0, 0, 0.14);
+  border: 1rem solid rgba(255, 255, 255, 0.08);
+}
+
+.pollReadout strong {
+  min-width: 0;
+  color: var(--accentColorNormal);
+  font-size: var(--fontSizeS);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pollReadout span {
+  flex: 0 0 auto;
+  color: var(--menuText2Normal);
+  font-size: var(--fontSizeS);
+  white-space: nowrap;
+}
+
+.pollRow {
+  display: flex;
+  flex-direction: column;
+  gap: 5rem;
+  padding: 7rem;
+  border-radius: 4rem;
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.pollRowTop {
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--fontSizeS);
+}
+
+.pollCandidate {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  margin-right: 8rem;
+}
+
+.pollSwatch {
+  width: 10rem;
+  height: 10rem;
+  flex: 0 0 10rem;
+  margin-right: 6rem;
+  border-radius: 2rem;
+  box-shadow: 0 0 0 1rem rgba(255, 255, 255, 0.26);
+}
+
+.pollName {
+  min-width: 0;
+  color: var(--menuText1Normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pollStats {
+  width: 50rem;
+  min-width: 50rem;
+  flex: 0 0 50rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.pollPercent {
+  width: 50rem;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  color: var(--menuText1Normal);
+  font-size: var(--fontSizeM);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pollPercentNumber,
+.pollPercentSymbol {
+  flex: 0 0 auto;
+  display: block;
+  white-space: nowrap;
+}
+
+.pollPercentSymbol {
+  padding-left: 1rem;
+}
+
+.pollTrack {
+  height: 8rem;
+  overflow: hidden;
+  border-radius: 4rem;
+  background-color: rgba(255, 255, 255, 0.14);
+}
+
+.pollFill {
+  height: 100%;
+  min-width: 2rem;
+  border-radius: 4rem;
+}
+
+.mayorCard {
+  flex: 0.95 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7rem;
+}
+
+.mayorHeader {
+  display: flex;
+  align-items: center;
+  gap: 8rem;
+  min-height: 44rem;
+}
+
+.mayorPortrait {
+  width: 40rem;
+  height: 40rem;
+  flex: 0 0 40rem;
+  border-radius: 4rem;
+  object-fit: cover;
+  background-color: var(--dividerColor);
+}
+
+.mayorTitle {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.mayorTitle span {
+  font-size: var(--fontSizeS);
+  color: var(--menuText2Normal);
+}
+
+.mayorNameLink {
+  width: 100%;
+  min-height: 30rem;
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding: 2rem 0;
+  background-color: transparent;
+  color: var(--accentColorNormal);
+  font-size: var(--fontSizeM);
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.mayorNameLink:hover {
+  text-decoration: underline;
+}
+
+.mayorPlatform {
+  min-height: 42rem;
+  padding-left: 48rem;
+}
+
+.mayorPlatform > span {
+  display: block;
+  margin-bottom: 3rem;
+  font-size: var(--fontSizeS);
+  font-weight: 700;
+  color: var(--accentColorNormal);
+}
+
+.mayorPlatform p {
+  margin: 0;
+  font-size: var(--fontSizeS);
+  line-height: 1.2;
+  color: var(--menuText1Normal);
+}
+
+.bribeBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 5rem;
+  padding-top: 7rem;
+  border-top: 1rem solid var(--dividerColor);
+}
+
+.bribeDropdown {
+  position: relative;
+  min-width: 0;
+}
+
+.bribeSelectButton {
+  width: 100%;
+  min-height: 30rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 3rem 7rem;
+  border: 1rem solid var(--dividerColor);
+  border-radius: 4rem;
+  background-color: rgba(0, 0, 0, 0.16);
+  color: var(--menuText1Normal);
+  font-size: var(--fontSizeS);
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bribeSelectButton span,
+.bribeOptionButton span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bribeMenu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 32rem;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  padding: 3rem;
+  border: 1rem solid var(--dividerColor);
+  border-radius: 4rem;
+  background-color: var(--panelColorNormal);
+  box-shadow: 0 5rem 14rem rgba(0, 0, 0, 0.32);
+}
+
+.bribeOptionButton {
+  width: 100%;
+  min-height: 28rem;
+  justify-content: flex-start;
+  padding: 3rem 5rem;
+  border-radius: 3rem;
+  font-size: var(--fontSizeS);
+  color: var(--menuText1Normal);
+}
+
+.bribeButton {
+  width: 100%;
+  min-height: 30rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 4rem;
+  border-radius: 4rem;
+  font-size: var(--fontSizeS);
+}
+
+.bribeButton strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bribeButtonDisabled {
+  opacity: 0.45;
+}

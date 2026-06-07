@@ -103,6 +103,40 @@ namespace Elections.Bridge
             }
         }
 
+        public static bool RequestElectionVictoryPartyTrip(Entity citizen, Entity targetBuilding, float durationMinutes, int priority)
+        {
+            EnsureResolve();
+            if (s_RequestSocialTrip == null)
+                return false;
+
+            try
+            {
+                return s_RequestSocialTrip(citizen, targetBuilding, Entity.Null, 1002, durationMinutes, priority);
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Warn($"RealisticTrips RequestElectionVictoryPartyTrip failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        public static bool RequestBribeMeetingTrip(Entity citizen, Entity targetBuilding, Entity hostCitizen, float durationMinutes, int priority)
+        {
+            EnsureResolve();
+            if (s_RequestSocialTrip == null)
+                return false;
+
+            try
+            {
+                return s_RequestSocialTrip(citizen, targetBuilding, hostCitizen, 1003, durationMinutes, priority);
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Warn($"RealisticTrips RequestBribeMeetingTrip failed: {ex.Message}");
+                return false;
+            }
+        }
+
         public static void SetMayorResourceConsumptionMultiplier(int effectId, float multiplier)
         {
             EnsurePolicyResolve();

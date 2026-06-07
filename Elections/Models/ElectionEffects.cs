@@ -8,7 +8,8 @@ namespace Elections.Models
     {
         CityModifier,
         Money,
-        RealisticTripsResourceConsumption
+        RealisticTripsResourceConsumption,
+        AccumulatedXp
     }
 
     internal struct ElectionEffectImpact
@@ -23,6 +24,7 @@ namespace Elections.Models
         public float Add;
         public float Mul;
         public float ResourceConsumptionMultiplier;
+        public float AccumulatedXpMultiplier;
     }
 
     internal struct ElectionEffectDefinition
@@ -41,6 +43,7 @@ namespace Elections.Models
         public float Add2;
         public float Mul2;
         public float ResourceConsumptionMultiplier;
+        public float AccumulatedXpMultiplier;
     }
 
     internal static class ElectionEffects
@@ -93,6 +96,7 @@ namespace Elections.Models
             Modifier("CollegeGraduation", "College graduation", "college graduation", CityModifierType.CollegeGraduation, 1, "raises", kEducation),
             Modifier("UniversityGraduation", "University graduation", "university graduation", CityModifierType.UniversityGraduation, 1, "raises", kEducation),
             Modifier("UniversityInterest", "University interest", "university interest", CityModifierType.UniversityInterest, 1, "raises", kMildNormal),
+            AccumulatedXp("AccumulatedXP", "Accumulated XP", "accumulated XP", 1, "doubles", new[] { 100 }),
             ResourceConsumption("ResourceConsumption", "Citizen resource consumption", "citizen resource consumption", -1, "reduces", kResourceConsumption)
         };
 
@@ -125,6 +129,7 @@ namespace Elections.Models
             Modifier("CollegeGraduation", "College graduation", "college graduation", CityModifierType.CollegeGraduation, -1, "lowers", kEducation),
             Modifier("UniversityGraduation", "University graduation", "university graduation", CityModifierType.UniversityGraduation, -1, "lowers", kEducation),
             Modifier("UniversityInterest", "University interest", "university interest", CityModifierType.UniversityInterest, -1, "lowers", kMildNormal),
+            AccumulatedXp("AccumulatedXP", "Accumulated XP", "accumulated XP", -1, "cuts", new[] { 50 }),
             ResourceConsumption("ResourceConsumption", "Citizen resource consumption", "citizen resource consumption", 1, "increases", kResourceConsumption)
         };
 
@@ -177,7 +182,7 @@ namespace Elections.Models
             ElectionEffectDefinition definition = new ElectionEffectDefinition
             {
                 Id = id,
-                Name = "Balanced Platform",
+                Name = "Mayoral Agenda",
                 Description = $"{positive.Sentence}, but {negative.Sentence}",
                 PlatformKey = $"{positive.Key}:{positive.ValueText}|{negative.Key}:{negative.ValueText}",
                 PositiveImpact = positive,
@@ -185,7 +190,8 @@ namespace Elections.Models
                 MoneyDelta = positive.MoneyDelta + negative.MoneyDelta,
                 ModifierType1 = (CityModifierType)(-1),
                 ModifierType2 = (CityModifierType)(-1),
-                ResourceConsumptionMultiplier = positive.ResourceConsumptionMultiplier * negative.ResourceConsumptionMultiplier
+                ResourceConsumptionMultiplier = positive.ResourceConsumptionMultiplier * negative.ResourceConsumptionMultiplier,
+                AccumulatedXpMultiplier = positive.AccumulatedXpMultiplier * negative.AccumulatedXpMultiplier
             };
 
             AddModifierImpact(ref definition, positive);
@@ -222,7 +228,8 @@ namespace Elections.Models
                 Positive = positive,
                 ModifierType = (CityModifierType)(-1),
                 Add = 0f,
-                ResourceConsumptionMultiplier = 1f
+                ResourceConsumptionMultiplier = 1f,
+                AccumulatedXpMultiplier = 1f
             };
 
             if (option.Kind == ElectionEffectImpactKind.Money)
@@ -239,6 +246,20 @@ namespace Elections.Models
 
             float signedPercent = effectiveAmount * option.Direction;
             float delta = signedPercent / 100f;
+
+            if (option.Kind == ElectionEffectImpactKind.AccumulatedXp)
+            {
+                impact.AccumulatedXpMultiplier = Math.Max(0f, 1f + delta);
+                impact.ValueText = FormatMultiplier(impact.AccumulatedXpMultiplier);
+                if (option.Direction > 0 && Math.Abs(effectiveAmount - 100f) < 0.05f)
+                    impact.Sentence = $"doubles {option.SentenceTarget}";
+                else if (option.Direction < 0 && Math.Abs(effectiveAmount - 50f) < 0.05f)
+                    impact.Sentence = $"cuts {option.SentenceTarget} in half";
+                else
+                    impact.Sentence = $"{(option.Direction > 0 ? "raises" : "lowers")} {option.SentenceTarget} by {FormatUnsignedPercent(effectiveAmount)}";
+                return impact;
+            }
+
             impact.ValueText = FormatSignedPercent(signedPercent);
             impact.Sentence = $"{option.Verb} {option.SentenceTarget} by {FormatUnsignedPercent(effectiveAmount)}";
 
@@ -262,7 +283,8 @@ namespace Elections.Models
                 ValueText = string.Empty,
                 Sentence = "keeps city policy neutral",
                 ModifierType = (CityModifierType)(-1),
-                ResourceConsumptionMultiplier = 1f
+                ResourceConsumptionMultiplier = 1f,
+                AccumulatedXpMultiplier = 1f
             };
 
             return new ElectionEffectDefinition
@@ -317,6 +339,21 @@ namespace Elections.Models
                 Label = label,
                 SentenceTarget = sentenceTarget,
                 Kind = ElectionEffectImpactKind.RealisticTripsResourceConsumption,
+                ModifierType = (CityModifierType)(-1),
+                Direction = direction,
+                Verb = verb,
+                Amounts = amounts
+            };
+        }
+
+        private static PlatformOption AccumulatedXp(string key, string label, string sentenceTarget, int direction, string verb, int[] amounts)
+        {
+            return new PlatformOption
+            {
+                Key = key,
+                Label = label,
+                SentenceTarget = sentenceTarget,
+                Kind = ElectionEffectImpactKind.AccumulatedXp,
                 ModifierType = (CityModifierType)(-1),
                 Direction = direction,
                 Verb = verb,
@@ -385,6 +422,15 @@ namespace Elections.Models
         private static string FormatSignedMoney(int value)
         {
             return value > 0 ? $"+{value:n0}" : $"{value:n0}";
+        }
+
+        private static string FormatMultiplier(float value)
+        {
+            float rounded = (float)Math.Round(value);
+            if (Math.Abs(value - rounded) < 0.05f)
+                return $"x{((int)rounded).ToString(CultureInfo.InvariantCulture)}";
+
+            return $"x{value.ToString("0.##", CultureInfo.InvariantCulture)}";
         }
     }
 }

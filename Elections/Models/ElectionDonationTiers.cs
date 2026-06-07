@@ -17,18 +17,18 @@ namespace Elections.Models
         public const int FixedDonationAmount = 1000000;
         public const float BonusPerDonation = 0.02f;
 
-        private static readonly ElectionDonationTier[] s_Tiers =
-        {
-            new ElectionDonationTier(FixedDonationAmount, BonusPerDonation)
-        };
-
-        public static int Count => s_Tiers.Length;
+        public static int Count => 1;
 
         public static bool TryGet(int tierIndex, out ElectionDonationTier tier)
         {
-            if (tierIndex >= 0 && tierIndex < s_Tiers.Length)
+            return TryGet(tierIndex, FixedDonationAmount, out tier);
+        }
+
+        public static bool TryGet(int tierIndex, int donationAmount, out ElectionDonationTier tier)
+        {
+            if (tierIndex >= 0 && tierIndex < Count)
             {
-                tier = s_Tiers[tierIndex];
+                tier = new ElectionDonationTier(NormalizeDonationAmount(donationAmount), BonusPerDonation);
                 return true;
             }
 
@@ -38,8 +38,18 @@ namespace Elections.Models
 
         public static float GetBonusForAmount(int amount)
         {
-            int donationCount = amount / FixedDonationAmount;
+            return GetBonusForAmount(amount, FixedDonationAmount);
+        }
+
+        public static float GetBonusForAmount(int amount, int donationAmount)
+        {
+            int donationCount = amount / NormalizeDonationAmount(donationAmount);
             return donationCount * BonusPerDonation;
+        }
+
+        public static int NormalizeDonationAmount(int donationAmount)
+        {
+            return donationAmount > 0 ? donationAmount : FixedDonationAmount;
         }
     }
 }

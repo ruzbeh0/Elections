@@ -6,6 +6,7 @@ using Game.Common;
 using Game.Rendering;
 using Game.Tools;
 using System.Collections.Generic;
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
@@ -21,12 +22,13 @@ namespace Elections.Systems
         private EntityQuery m_StateQuery;
         private EntityQuery m_VoteTripQuery;
         private EntityQuery m_SchoolQuery;
-        private EntityQuery m_PoliceQuery;
-        private EntityQuery m_FireQuery;
         private EntityQuery m_WelfareQuery;
         private EntityQuery m_AdminQuery;
+        private EntityQuery m_PostQuery;
         private readonly Dictionary<Entity, VoteTally> m_VoteTallies = new Dictionary<Entity, VoteTally>(128);
+        private readonly Dictionary<Entity, VoteTally> m_CurrentVoteTallies = new Dictionary<Entity, VoteTally>(128);
         private readonly HashSet<Entity> m_PollingPlaceSet = new HashSet<Entity>();
+        private int m_LastTalliedElectionDayKey;
 
         protected override void OnCreate()
         {
@@ -42,10 +44,9 @@ namespace Elections.Systems
             });
 
             m_SchoolQuery = CreatePollingPlaceQuery(ComponentType.ReadOnly<School>());
-            m_PoliceQuery = CreatePollingPlaceQuery(ComponentType.ReadOnly<PoliceStation>());
-            m_FireQuery = CreatePollingPlaceQuery(ComponentType.ReadOnly<FireStation>());
             m_WelfareQuery = CreatePollingPlaceQuery(ComponentType.ReadOnly<WelfareOffice>());
             m_AdminQuery = CreatePollingPlaceQuery(ComponentType.ReadOnly<AdminBuilding>());
+            m_PostQuery = CreatePollingPlaceQuery(ComponentType.ReadOnly<Game.Buildings.PostFacility>());
         }
 
         protected override void OnUpdate()
@@ -64,15 +65,18 @@ namespace Elections.Systems
             if (showVoteCounts)
                 TallyVotes(state.electionDayKey);
             else
+            {
                 m_VoteTallies.Clear();
+                m_CurrentVoteTallies.Clear();
+                m_LastTalliedElectionDayKey = 0;
+            }
 
             m_PollingPlaceSet.Clear();
             NativeList<VotingLocationMarker> markers = new NativeList<VotingLocationMarker>(128, Allocator.TempJob);
-            AddPollingPlaces(m_SchoolQuery, markers, showVoteCounts);
-            AddPollingPlaces(m_PoliceQuery, markers, showVoteCounts);
-            AddPollingPlaces(m_FireQuery, markers, showVoteCounts);
-            AddPollingPlaces(m_WelfareQuery, markers, showVoteCounts);
-            AddPollingPlaces(m_AdminQuery, markers, showVoteCounts);
+            AddPollingPlaces(m_SchoolQuery, markers, showVoteCounts, state);
+            AddPollingPlaces(m_WelfareQuery, markers, showVoteCounts, state);
+            AddPollingPlaces(m_AdminQuery, markers, showVoteCounts, state);
+            AddPollingPlaces(m_PostQuery, markers, showVoteCounts, state);
 
             if (markers.Length == 0)
             {
@@ -113,13 +117,24 @@ namespace Elections.Systems
             return GetEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<Building>(), componentType },
-                None = new[] { ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Temp>() }
+                None = new[]
+                {
+                    ComponentType.Exclude<Deleted>(),
+                    ComponentType.Exclude<Temp>(),
+                    ComponentType.Exclude<Owner>()
+                }
             });
         }
 
         private void TallyVotes(int electionDayKey)
         {
-            m_VoteTallies.Clear();
+            if (m_LastTalliedElectionDayKey != electionDayKey)
+            {
+                m_VoteTallies.Clear();
+                m_LastTalliedElectionDayKey = electionDayKey;
+            }
+
+            m_CurrentVoteTallies.Clear();
 
             using (NativeArray<ElectionVoteTrip> voteTrips = m_VoteTripQuery.ToComponentDataArray<ElectionVoteTrip>(Allocator.Temp))
             {
@@ -129,18 +144,27 @@ namespace Elections.Systems
                     if (!voteTrip.voted || voteTrip.electionDayKey != electionDayKey || voteTrip.pollingPlace == Entity.Null)
                         continue;
 
-                    m_VoteTallies.TryGetValue(voteTrip.pollingPlace, out VoteTally tally);
+                    m_CurrentVoteTallies.TryGetValue(voteTrip.pollingPlace, out VoteTally tally);
                     if (voteTrip.chosenCandidate == 0)
                         tally.votesA++;
                     else if (voteTrip.chosenCandidate == 1)
                         tally.votesB++;
 
-                    m_VoteTallies[voteTrip.pollingPlace] = tally;
+                    m_CurrentVoteTallies[voteTrip.pollingPlace] = tally;
                 }
+            }
+
+            foreach (KeyValuePair<Entity, VoteTally> entry in m_CurrentVoteTallies)
+            {
+                m_VoteTallies.TryGetValue(entry.Key, out VoteTally displayed);
+                VoteTally current = entry.Value;
+                displayed.votesA = math.max(displayed.votesA, current.votesA);
+                displayed.votesB = math.max(displayed.votesB, current.votesB);
+                m_VoteTallies[entry.Key] = displayed;
             }
         }
 
-        private void AddPollingPlaces(EntityQuery query, NativeList<VotingLocationMarker> markers, bool showVoteCounts)
+        private void AddPollingPlaces(EntityQuery query, NativeList<VotingLocationMarker> markers, bool showVoteCounts, ElectionState state)
         {
             using (NativeArray<Entity> entities = query.ToEntityArray(Allocator.Temp))
             {
@@ -156,7 +180,10 @@ namespace Elections.Systems
                     Game.Objects.Transform transform = EntityManager.GetComponentData<Game.Objects.Transform>(entity);
                     VoteTally tally = default;
                     if (showVoteCounts)
+                    {
                         m_VoteTallies.TryGetValue(entity, out tally);
+                        tally = ApplyDisplayedVoteLoss(entity, tally, state);
+                    }
 
                     markers.Add(new VotingLocationMarker
                     {
@@ -166,6 +193,19 @@ namespace Elections.Systems
                     });
                 }
             }
+        }
+
+        private static VoteTally ApplyDisplayedVoteLoss(Entity pollingPlace, VoteTally tally, ElectionState state)
+        {
+            if (pollingPlace != Entity.Null &&
+                pollingPlace == state.voteTamperingPollingPlace &&
+                (state.voteTamperingLostVotesA > 0 || state.voteTamperingLostVotesB > 0))
+            {
+                tally.votesA = math.max(0, tally.votesA - state.voteTamperingLostVotesA);
+                tally.votesB = math.max(0, tally.votesB - state.voteTamperingLostVotesB);
+            }
+
+            return tally;
         }
 
         private struct VoteTally
@@ -181,6 +221,7 @@ namespace Elections.Systems
             public int votesB;
         }
 
+        [BurstCompile]
         private struct DrawVotingLocationOverlayJob : IJob
         {
             public OverlayRenderSystem.Buffer overlayBuffer;
@@ -195,77 +236,162 @@ namespace Elections.Systems
             {
                 float rawZoom = math.clamp((zoomLevel - 900f) / 12500f, 0f, 1f);
                 float normalizedZoom = math.pow(rawZoom, 0.68f);
-                float thickness = math.lerp(3.0f, 21.0f, normalizedZoom);
-                float badgeSize = thickness * 3.0f;
-                float groundRadius = thickness * 5.2f;
+                const float visualScale = 1.265f;
+                float thickness = math.lerp(3.0f, 21.0f, normalizedZoom) * visualScale;
+                float badgeSize = thickness * 3.3f;
                 float markerHeight = math.lerp(14f, 54f, normalizedZoom);
+                float anchorHeight = math.lerp(2.0f, 8.0f, normalizedZoom);
+                float cameraNudge = math.lerp(8f, 26f, normalizedZoom);
+                float sideOffset = badgeSize * 1.65f + thickness * 2.2f;
+                float overlapRadius = badgeSize * 2.25f;
+                float stackStep = badgeSize * 1.18f;
 
                 float3 right = math.normalizesafe(cameraRight, new float3(1f, 0f, 0f));
                 float3 up = math.normalizesafe(cameraUp, new float3(0f, 1f, 0f));
                 float3 worldUp = new float3(0f, 1f, 0f);
+                NativeList<float3> drawnBadgeCenters = new NativeList<float3>(markers.Length, Allocator.Temp);
 
                 for (int i = 0; i < markers.Length; i++)
                 {
                     VotingLocationMarker marker = markers[i];
-                    float3 ground = marker.position + worldUp * 0.6f;
-                    float3 center = marker.position + worldUp * markerHeight;
+                    float3 anchor = marker.position + worldUp * anchorHeight;
+                    float3 toCamera = math.normalizesafe(cameraPosition - anchor, up);
+                    float3 center = anchor + worldUp * markerHeight + right * sideOffset + toCamera * cameraNudge;
+                    center = ResolveBadgeOverlap(center, drawnBadgeCenters, overlapRadius, stackStep, up);
+                    drawnBadgeCenters.Add(center);
 
-                    overlayBuffer.DrawCircle(new Color(0.06f, 0.12f, 0.2f, 0.72f), ground, groundRadius + thickness * 0.28f);
-                    overlayBuffer.DrawCircle(new Color(0.95f, 0.72f, 0.18f, 0.22f), ground, groundRadius);
-                    overlayBuffer.DrawLine(new Color(0.95f, 0.72f, 0.18f, 0.75f), new Line3.Segment(ground, center - up * (badgeSize * 0.9f)), thickness * 0.32f);
+                    DrawLeader(anchor + toCamera * (thickness * 0.6f), center, badgeSize, thickness, right);
+                    DrawLocationAnchor(anchor + toCamera * (thickness * 0.65f), thickness, right);
 
-                    DrawBallotMarker(center, badgeSize, thickness, right, up);
+                    DrawBallotMarker(center, badgeSize, thickness, right, up, marker.votesA, marker.votesB, showVoteCounts);
 
                     if (showVoteCounts)
                     {
-                        float3 labelCenter = center - up * (badgeSize * 1.18f);
+                        float3 labelCenter = center - up * (badgeSize * 1.25f);
                         DrawVoteSplitIndicator(
                             labelCenter,
                             marker.votesA,
                             marker.votesB,
-                            new Color(0.06f, 0.12f, 0.2f, 0.94f),
-                            new Color(1.0f, 0.84f, 0.36f, 1f),
+                            new Color(0.05f, 0.10f, 0.17f, 1f),
+                            new Color(0.94f, 0.98f, 1f, 1f),
                             thickness,
                             right,
                             up);
                     }
                 }
+
+                drawnBadgeCenters.Dispose();
             }
 
-            private void DrawBallotMarker(float3 center, float size, float thickness, float3 right, float3 up)
+            private float3 ResolveBadgeOverlap(float3 center, NativeList<float3> drawnBadgeCenters, float overlapRadius, float stackStep, float3 up)
             {
-                Color navy = new Color(0.04f, 0.11f, 0.2f, 0.96f);
-                Color outline = new Color(0.99f, 0.82f, 0.32f, 1f);
-                Color paper = new Color(0.98f, 0.98f, 0.94f, 1f);
-                Color box = new Color(0.18f, 0.38f, 0.62f, 1f);
-                Color hand = new Color(1.0f, 0.72f, 0.45f, 1f);
+                const int maxStackSteps = 8;
+                float3 candidate = center;
+                for (int stack = 0; stack < maxStackSteps; stack++)
+                {
+                    bool overlaps = false;
+                    for (int i = 0; i < drawnBadgeCenters.Length; i++)
+                    {
+                        if (math.distance(candidate, drawnBadgeCenters[i]) < overlapRadius)
+                        {
+                            overlaps = true;
+                            break;
+                        }
+                    }
 
-                float badgeWidth = size * 2.12f;
-                float badgeHeight = size * 1.72f;
-                DrawPill(center, badgeWidth, badgeHeight, thickness * 0.55f, right, outline);
-                DrawPill(center, badgeWidth, badgeHeight, 0f, right, navy);
+                    if (!overlaps)
+                        return candidate;
 
-                float boxWidth = size * 1.12f;
-                float boxHeight = size * 0.56f;
-                float3 boxCenter = center - up * (size * 0.24f);
-                DrawPill(boxCenter, boxWidth, boxHeight, thickness * 0.23f, right, outline);
+                    candidate += up * stackStep;
+                }
+
+                return candidate;
+            }
+
+            private void DrawLeader(float3 anchor, float3 center, float badgeSize, float thickness, float3 right)
+            {
+                float3 markerEdge = center - right * (badgeSize * 1.05f);
+                Color shadow = new Color(0.00f, 0.02f, 0.05f, 0.86f);
+                Color line = new Color(0.86f, 0.96f, 1f, 0.92f);
+                overlayBuffer.DrawLine(shadow, new Line3.Segment(anchor, markerEdge), thickness * 0.52f);
+                overlayBuffer.DrawLine(line, new Line3.Segment(anchor, markerEdge), thickness * 0.28f);
+            }
+
+            private void DrawLocationAnchor(float3 center, float thickness, float3 right)
+            {
+                DrawDisc(center, thickness * 2.55f, right, new Color(0.00f, 0.02f, 0.05f, 0.90f));
+                DrawDisc(center, thickness * 1.55f, right, new Color(0.86f, 0.96f, 1f, 0.95f));
+            }
+
+            private void DrawBallotMarker(float3 center, float size, float thickness, float3 right, float3 up, int votesA, int votesB, bool showVoteCounts)
+            {
+                Color shadow = new Color(0.01f, 0.04f, 0.09f, 1f);
+                Color navy = new Color(0.04f, 0.10f, 0.17f, 1f);
+                Color paper = new Color(0.96f, 0.99f, 1f, 1f);
+                Color paperLine = new Color(0.70f, 0.80f, 0.86f, 1f);
+                Color box = new Color(0.08f, 0.45f, 0.50f, 1f);
+                Color boxLight = new Color(0.82f, 0.96f, 1f, 1f);
+                Color check = new Color(0.04f, 0.45f, 0.67f, 1f);
+
+                DrawDisc(center - up * (thickness * 0.06f), size * 2.06f, right, shadow);
+                DrawDisc(center, size * 1.56f, right, navy);
+                DrawVoteRing(center, size * 0.92f, thickness * 0.64f, votesA, votesB, showVoteCounts, right, up);
+
+                float paperWidth = size * 0.56f;
+                float paperHeight = size * 0.72f;
+                float3 paperCenter = center + up * (size * 0.10f);
+                DrawPill(paperCenter, paperWidth, paperHeight, thickness * 0.08f, right, navy);
+                DrawPill(paperCenter, paperWidth, paperHeight, 0f, right, paper);
+
+                float boxWidth = size * 0.76f;
+                float boxHeight = size * 0.42f;
+                float3 boxCenter = center - up * (size * 0.34f);
+                DrawPill(boxCenter, boxWidth, boxHeight, thickness * 0.12f, right, navy);
                 DrawPill(boxCenter, boxWidth, boxHeight, 0f, right, box);
 
-                float3 slotCenter = boxCenter + up * (boxHeight * 0.5f);
-                overlayBuffer.DrawLine(outline, new Line3.Segment(slotCenter - right * (boxWidth * 0.28f), slotCenter + right * (boxWidth * 0.28f)), thickness * 0.22f);
+                float3 slotCenter = boxCenter + up * (boxHeight * 0.44f);
+                overlayBuffer.DrawLine(boxLight, new Line3.Segment(slotCenter - right * (boxWidth * 0.22f), slotCenter + right * (boxWidth * 0.22f)), thickness * 0.14f);
 
-                float ballotWidth = size * 0.44f;
-                float ballotHeight = size * 0.56f;
-                float3 ballotCenter = center + up * (size * 0.38f) - right * (size * 0.07f);
-                DrawPill(ballotCenter, ballotWidth, ballotHeight, thickness * 0.14f, right, outline);
-                DrawPill(ballotCenter, ballotWidth, ballotHeight, 0f, right, paper);
-                overlayBuffer.DrawLine(box, new Line3.Segment(ballotCenter - right * (ballotWidth * 0.24f) - up * (ballotHeight * 0.08f), ballotCenter + right * (ballotWidth * 0.24f) - up * (ballotHeight * 0.08f)), thickness * 0.12f);
+                float3 lineA = paperCenter + up * (paperHeight * 0.24f);
+                float3 lineB = paperCenter + up * (paperHeight * 0.02f);
+                overlayBuffer.DrawLine(paperLine, new Line3.Segment(lineA - right * (paperWidth * 0.25f), lineA + right * (paperWidth * 0.25f)), thickness * 0.08f);
+                overlayBuffer.DrawLine(paperLine, new Line3.Segment(lineB - right * (paperWidth * 0.25f), lineB + right * (paperWidth * 0.12f)), thickness * 0.08f);
 
-                float3 wrist = center - right * (size * 0.82f) + up * (size * 0.33f);
-                float3 palm = center - right * (size * 0.3f) + up * (size * 0.26f);
-                overlayBuffer.DrawLine(hand, new Line3.Segment(wrist, palm), thickness * 0.42f);
-                overlayBuffer.DrawLine(hand, new Line3.Segment(palm, ballotCenter - right * (ballotWidth * 0.2f) + up * (ballotHeight * 0.28f)), thickness * 0.18f);
-                overlayBuffer.DrawLine(new Color(0.55f, 0.32f, 0.18f, 0.95f), new Line3.Segment(wrist - up * (thickness * 0.12f), palm - up * (thickness * 0.12f)), thickness * 0.08f);
+                float3 checkStart = paperCenter - right * (paperWidth * 0.23f) - up * (paperHeight * 0.07f);
+                float3 checkMiddle = paperCenter - right * (paperWidth * 0.06f) - up * (paperHeight * 0.24f);
+                float3 checkEnd = paperCenter + right * (paperWidth * 0.29f) + up * (paperHeight * 0.18f);
+                overlayBuffer.DrawLine(check, new Line3.Segment(checkStart, checkMiddle), thickness * 0.18f);
+                overlayBuffer.DrawLine(check, new Line3.Segment(checkMiddle, checkEnd), thickness * 0.18f);
+            }
+
+            private void DrawVoteRing(float3 center, float radius, float ringThickness, int votesA, int votesB, bool showVoteCounts, float3 right, float3 up)
+            {
+                Color purple = new Color(0.72f, 0.42f, 1.0f, 1f);
+                Color green = new Color(0.34f, 0.86f, 0.44f, 1f);
+                Color track = new Color(0.11f, 0.17f, 0.25f, 1f);
+                int total = math.max(0, votesA + votesB);
+                float aShare = showVoteCounts && total > 0 ? math.saturate(votesA / (float)total) : 0.5f;
+                int segments = 52;
+                float tau = math.PI * 2f;
+                float startAngle = -math.PI * 0.56f;
+
+                for (int i = 0; i < segments; i++)
+                {
+                    float normalizedStart = i / (float)segments;
+                    float normalizedMid = (i + 0.5f) / segments;
+                    float angle0 = startAngle + tau * normalizedStart;
+                    float angle1 = startAngle + tau * ((i + 0.78f) / segments);
+                    float3 start = center + right * (math.cos(angle0) * radius) + up * (math.sin(angle0) * radius);
+                    float3 end = center + right * (math.cos(angle1) * radius) + up * (math.sin(angle1) * radius);
+                    Color color = total == 0 && showVoteCounts ? track : (normalizedMid <= aShare ? purple : green);
+                    overlayBuffer.DrawLine(color, new Line3.Segment(start, end), ringThickness);
+                }
+            }
+
+            private void DrawDisc(float3 center, float diameter, float3 right, Color color)
+            {
+                float halfWidth = math.max(0.01f, diameter * 0.015f);
+                overlayBuffer.DrawLine(color, new Line3.Segment(center - right * halfWidth, center + right * halfWidth), diameter);
             }
 
             private void DrawPill(float3 center, float width, float height, float outlinePadding, float3 right, Color color)
@@ -280,45 +406,24 @@ namespace Elections.Systems
                 int number = math.max(0, votesA + votesB);
                 number = math.max(0, number);
                 int digitsCount = GetDigitCount(number);
-                NativeList<int> digits = new NativeList<int>(digitsCount, Allocator.Temp);
                 int tempNum = number;
-                if (tempNum == 0)
-                {
-                    digits.Add(0);
-                }
-                else
-                {
-                    while (tempNum > 0)
-                    {
-                        digits.Add(tempNum % 10);
-                        tempNum /= 10;
-                    }
-                }
 
                 float digitWidth = thickness * 1.05f;
-                float digitHeight = thickness * 2.0f;
-                float spacing = thickness * 0.48f;
-                float totalWidth = digits.Length * digitWidth + math.max(0, digits.Length - 1) * spacing;
-                float bgWidth = totalWidth + thickness * 4.2f;
+                float digitHeight = thickness * 1.78f;
+                float spacing = thickness * 0.42f;
+                float totalWidth = digitsCount * digitWidth + math.max(0, digitsCount - 1) * spacing;
+                float bgWidth = totalWidth + thickness * 4.0f;
 
-                overlayBuffer.DrawLine(bgColor, new Line3.Segment(center - right * (bgWidth * 0.5f), center + right * (bgWidth * 0.5f)), digitHeight + thickness * 1.75f);
-                overlayBuffer.DrawLine(new Color(0.95f, 0.72f, 0.18f, 0.85f), new Line3.Segment(center - right * (bgWidth * 0.5f), center + right * (bgWidth * 0.5f)), thickness * 0.2f);
+                overlayBuffer.DrawLine(new Color(0.00f, 0.03f, 0.07f, 1f), new Line3.Segment(center - right * (bgWidth * 0.52f), center + right * (bgWidth * 0.52f)), digitHeight + thickness * 1.92f);
+                overlayBuffer.DrawLine(bgColor, new Line3.Segment(center - right * (bgWidth * 0.5f), center + right * (bgWidth * 0.5f)), digitHeight + thickness * 1.62f);
 
-                if (number > 0)
+                float3 cursor = center + right * (totalWidth * 0.5f - digitWidth * 0.5f) - up * (thickness * 0.18f);
+                for (int i = 0; i < digitsCount; i++)
                 {
-                    float barWidth = bgWidth - thickness * 1.7f;
-                    float3 barCenter = center + up * (digitHeight * 0.66f);
-                    DrawVoteSplitBar(barCenter, barWidth, thickness * 0.72f, votesA, votesB, right);
-                }
-
-                float3 cursor = center + right * (totalWidth * 0.5f - digitWidth * 0.5f) - up * (thickness * 0.28f);
-                for (int i = 0; i < digits.Length; i++)
-                {
-                    DrawDigit(cursor, digits[i], textColor, digitWidth, digitHeight, thickness * 0.34f, right, up);
+                    DrawDigit(cursor, tempNum % 10, textColor, digitWidth, digitHeight, thickness * 0.32f, right, up);
+                    tempNum /= 10;
                     cursor -= right * (digitWidth + spacing);
                 }
-
-                digits.Dispose();
             }
 
             private void DrawVoteSplitBar(float3 center, float width, float height, int votesA, int votesB, float3 right)

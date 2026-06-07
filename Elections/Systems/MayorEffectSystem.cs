@@ -4,6 +4,7 @@ using Elections.Models;
 using Game;
 using Game.City;
 using Game.Simulation;
+using System;
 using Unity.Entities;
 
 namespace Elections.Systems
@@ -71,8 +72,9 @@ namespace Elections.Systems
 
                 if (!state.mayorMoneyApplied)
                 {
-                    ElectionDebug.Log($"Applying mayor money effect: effectId={state.mayorEffectId}, effect={effect.Name}, delta={effect.MoneyDelta:n0}.");
+                    ElectionDebug.Log($"Applying mayor one-time effects: effectId={state.mayorEffectId}, effect={effect.Name}, moneyDelta={effect.MoneyDelta:n0}, xpMultiplier={effect.AccumulatedXpMultiplier:0.##}.");
                     ApplyMoney(city, effect.MoneyDelta);
+                    ApplyAccumulatedXp(city, effect.AccumulatedXpMultiplier);
                     state.mayorMoneyApplied = true;
                 }
 
@@ -107,6 +109,30 @@ namespace Elections.Systems
                 money.Subtract(-delta);
             EntityManager.SetComponentData(city, money);
             ElectionDebug.Log($"Mayor money effect applied: delta={delta:n0}.");
+        }
+
+        private void ApplyAccumulatedXp(Entity city, float multiplier)
+        {
+            if (multiplier <= 0f ||
+                Math.Abs(multiplier - 1f) < 0.0001f ||
+                !EntityManager.HasComponent<XP>(city))
+            {
+                return;
+            }
+
+            XP xp = EntityManager.GetComponentData<XP>(city);
+            int currentXp = xp.m_XP;
+            if (currentXp <= 0)
+                return;
+
+            long delta = (long)Math.Round(currentXp * (double)(multiplier - 1f));
+            if (delta == 0)
+                return;
+
+            long newXp = Math.Max(0L, Math.Min(int.MaxValue, (long)currentXp + delta));
+            xp.m_XP = (int)newXp;
+            EntityManager.SetComponentData(city, xp);
+            ElectionDebug.Log($"Mayor accumulated XP effect applied: previousXp={currentXp:n0}, multiplier={multiplier:0.##}, delta={delta:n0}, newXp={xp.m_XP:n0}.");
         }
 
         private static void SyncRealisticTripsEffect(ElectionState state)

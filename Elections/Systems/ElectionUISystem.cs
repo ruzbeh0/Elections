@@ -52,7 +52,11 @@ namespace Elections.Systems
             AddBinding(new TriggerBinding<int>(Mod.Id, "focusCandidate", FocusCandidate));
             AddBinding(new TriggerBinding(Mod.Id, "focusMayor", FocusMayor));
             AddBinding(new TriggerBinding<int, int>(Mod.Id, "donate", Donate));
+            AddBinding(new TriggerBinding<int>(Mod.Id, "runSupportProgram", RunSupportProgram));
             AddBinding(new TriggerBinding<int>(Mod.Id, "bribeMayor", BribeMayor));
+            AddBinding(new TriggerBinding<int>(Mod.Id, "endorseCandidate", EndorseCandidate));
+            AddBinding(new TriggerBinding<int>(Mod.Id, "tamperVotes", TamperVotes));
+            AddBinding(new TriggerBinding(Mod.Id, "proposeVotingIdLaw", ProposeVotingIdLaw));
             AddBinding(new TriggerBinding<bool>(Mod.Id, "setShowVotingLocations", SetShowVotingLocations));
         }
 
@@ -77,9 +81,33 @@ namespace Elections.Systems
             m_PanelBinding?.Update();
         }
 
+        private void RunSupportProgram(int programIndex)
+        {
+            m_LifecycleSystem?.RunSupportProgram(programIndex);
+            m_PanelBinding?.Update();
+        }
+
         private void BribeMayor(int candidateIndex)
         {
             m_LifecycleSystem?.BribeMayor(candidateIndex);
+            m_PanelBinding?.Update();
+        }
+
+        private void EndorseCandidate(int candidateIndex)
+        {
+            m_LifecycleSystem?.EndorseCandidate(candidateIndex);
+            m_PanelBinding?.Update();
+        }
+
+        private void TamperVotes(int candidateIndex)
+        {
+            m_LifecycleSystem?.ScheduleVoteTampering(candidateIndex);
+            m_PanelBinding?.Update();
+        }
+
+        private void ProposeVotingIdLaw()
+        {
+            m_LifecycleSystem?.ProposeStrictVotingIdLaw();
             m_PanelBinding?.Update();
         }
 
@@ -150,13 +178,25 @@ namespace Elections.Systems
                 writer.PropertyName("donationsOpen"); writer.Write(false);
                 writer.PropertyName("bribesOpen"); writer.Write(false);
                 writer.PropertyName("canBribe"); writer.Write(false);
+                writer.PropertyName("canEndorse"); writer.Write(false);
+                writer.PropertyName("endorsementUsed"); writer.Write(false);
+                writer.PropertyName("endorsedCandidateIndex"); writer.Write(-1);
+                writer.PropertyName("canTamper"); writer.Write(false);
+                writer.PropertyName("voteTamperingScheduled"); writer.Write(false);
+                writer.PropertyName("voteTamperingCandidateIndex"); writer.Write(-1);
+                writer.PropertyName("canProposeVotingId"); writer.Write(false);
+                writer.PropertyName("votingIdLawPassed"); writer.Write(false);
+                writer.PropertyName("votingIdProposalPending"); writer.Write(false);
                 writer.PropertyName("bribeUsedToday"); writer.Write(false);
+                writer.PropertyName("bribeBlocked"); writer.Write(false);
+                writer.PropertyName("bribeMeetingPending"); writer.Write(false);
                 writer.PropertyName("bribeCost"); writer.Write(ElectionLifecycleSystem.BribeAmount);
+                WriteSupportProgramPanel(writer, default(ElectionState), false, false, false);
                 writer.PropertyName("pollDate"); writer.Write(string.Empty);
                 writer.PropertyName("electionDate"); writer.Write(string.Empty);
                 WriteScheduleTimes(writer);
                 WriteEmptyPoll(writer);
-                WriteDonationTiers(writer);
+                WriteDonationTiers(writer, ElectionDonationTiers.FixedDonationAmount);
                 writer.PropertyName("candidateA"); WriteEmptyCandidate(writer, 0, "Candidate A");
                 writer.PropertyName("candidateB"); WriteEmptyCandidate(writer, 1, "Candidate B");
                 WriteEmptyMayor(writer);
@@ -169,10 +209,25 @@ namespace Elections.Systems
                 !populationReady &&
                 !state.HasCandidates &&
                 state.stage == ElectionCampaignStage.None;
-            bool donationsOpen = !waitingForPopulationState && IsDonationStage(state.stage) && state.HasCandidates;
-            int dayKey = hasDateTime ? ElectionUtility.CurrentCalendarDayKey(World, now) : 0;
+            bool electionDay = hasDateTime && IsElectionDay(state, now);
+            bool donationsOpen = !waitingForPopulationState && IsDonationStage(state.stage) && state.HasCandidates && !electionDay;
             bool bribesOpen = hasDateTime && donationsOpen && state.mayor != Entity.Null;
-            bool bribeUsedToday = hasDateTime && state.bribeDayKey == dayKey;
+            bool bribeMeetingPending = hasDateTime &&
+                (state.bribeMeetingCandidateIndex == 0 || state.bribeMeetingCandidateIndex == 1) &&
+                state.bribeMeetingDeadlineTicks > 0;
+            bool bribeBlocked = hasDateTime &&
+                (bribeMeetingPending || state.bribeBlockedUntilTicks > now.Ticks);
+            bool bribeUsedToday = bribeBlocked;
+            bool endorsementUsed = state.mayorEndorsementCandidateIndex == 0 ||
+                state.mayorEndorsementCandidateIndex == 1;
+            bool voteTamperingScheduled = state.voteTamperingCandidateIndex == 0 ||
+                state.voteTamperingCandidateIndex == 1;
+            bool votingIdProposalPending = state.strictVotingIdProposalPending &&
+                !state.strictVotingIdChirpSent &&
+                state.strictVotingIdChirpUtcTicks > 0;
+            bool supportProgramsOpen = hasDateTime && !waitingForPopulationState && IsDonationStage(state.stage) && state.HasCandidates && !electionDay;
+            bool supportProgramUsedToday = hasDateTime &&
+                state.supportProgramDayKey == ElectionUtility.CurrentCalendarDayKey(World, now);
 
             writer.PropertyName("hasState"); writer.Write(true);
             writer.PropertyName("waitingForPopulation"); writer.Write(waitingForPopulationState);
@@ -184,14 +239,26 @@ namespace Elections.Systems
             writer.PropertyName("pollReleased"); writer.Write(pollReleased);
             writer.PropertyName("donationsOpen"); writer.Write(donationsOpen);
             writer.PropertyName("bribesOpen"); writer.Write(bribesOpen);
-            writer.PropertyName("canBribe"); writer.Write(bribesOpen && !bribeUsedToday);
+            writer.PropertyName("canBribe"); writer.Write(bribesOpen && !bribeBlocked);
+            writer.PropertyName("canEndorse"); writer.Write(bribesOpen && !bribeBlocked && !endorsementUsed);
+            writer.PropertyName("endorsementUsed"); writer.Write(endorsementUsed);
+            writer.PropertyName("endorsedCandidateIndex"); writer.Write(endorsementUsed ? state.mayorEndorsementCandidateIndex : -1);
+            writer.PropertyName("canTamper"); writer.Write(bribesOpen && !bribeBlocked && !voteTamperingScheduled);
+            writer.PropertyName("voteTamperingScheduled"); writer.Write(voteTamperingScheduled);
+            writer.PropertyName("voteTamperingCandidateIndex"); writer.Write(voteTamperingScheduled ? state.voteTamperingCandidateIndex : -1);
+            writer.PropertyName("canProposeVotingId"); writer.Write(bribesOpen && !bribeBlocked && !state.strictVotingIdLawPassed && !votingIdProposalPending);
+            writer.PropertyName("votingIdLawPassed"); writer.Write(state.strictVotingIdLawPassed);
+            writer.PropertyName("votingIdProposalPending"); writer.Write(votingIdProposalPending);
             writer.PropertyName("bribeUsedToday"); writer.Write(bribeUsedToday);
-            writer.PropertyName("bribeCost"); writer.Write(ElectionLifecycleSystem.BribeAmount);
+            writer.PropertyName("bribeBlocked"); writer.Write(bribeBlocked);
+            writer.PropertyName("bribeMeetingPending"); writer.Write(bribeMeetingPending);
+            writer.PropertyName("bribeCost"); writer.Write(GetCampaignBribeAmount(state));
+            WriteSupportProgramPanel(writer, state, supportProgramsOpen, supportProgramUsedToday, electionDay);
             writer.PropertyName("pollDate"); writer.Write(FormatScheduledDate(state.pollYear, state.pollMonth));
-            writer.PropertyName("electionDate"); writer.Write(FormatScheduledDate(state.electionYear, state.electionMonth));
+            writer.PropertyName("electionDate"); writer.Write(FormatElectionDate(state));
             WriteScheduleTimes(writer, state);
             WritePoll(writer, state, pollReleased);
-            WriteDonationTiers(writer);
+            WriteDonationTiers(writer, state.campaignDonationAmount);
             writer.PropertyName("candidateA");
             if (state.HasCandidates)
                 WriteCandidate(writer, state, true);
@@ -230,7 +297,7 @@ namespace Elections.Systems
             int portraitIndex = candidateA ? state.candidateAPortraitIndex : state.candidateBPortraitIndex;
             int donationAmount = candidateA ? state.donationA : state.donationB;
             ElectionEffectDefinition effect = ElectionEffects.Get(effectId, candidateA ? state.candidateANegativeSoftened : state.candidateBNegativeSoftened);
-            int donationBonusPercent = (int)math.round(ElectionDonationTiers.GetBonusForAmount(donationAmount) * 100f);
+            int donationBonusPercent = (int)math.round(ElectionDonationTiers.GetBonusForAmount(donationAmount, state.campaignDonationAmount) * 100f);
             bool canFocus = candidate != Entity.Null && EntityManager.Exists(candidate);
 
             writer.TypeBegin("ElectionCandidate");
@@ -290,15 +357,16 @@ namespace Elections.Systems
             writer.PropertyName("mayorTemporary"); writer.Write(state.mayorEffectId == 0 && state.mayor != Entity.Null);
         }
 
-        private static int GetMayorPortraitIndex(ElectionState state)
+        private int GetMayorPortraitIndex(ElectionState state)
         {
-            if (state.mayor == state.candidateA && state.candidateAPortraitIndex >= 0)
-                return state.candidateAPortraitIndex;
-
-            if (state.mayor == state.candidateB && state.candidateBPortraitIndex >= 0)
-                return state.candidateBPortraitIndex;
-
-            return CandidatePortraitCatalog.PickPortraitIndex(state.mayor, 4241);
+            return CandidatePortraitCatalog.PickDifferentPortraitIndex(
+                EntityManager,
+                state.mayor,
+                4241,
+                state.candidateA,
+                state.candidateAPortraitIndex,
+                state.candidateB,
+                state.candidateBPortraitIndex);
         }
 
         private static void WriteEmptyMayor(IJsonWriter writer)
@@ -360,6 +428,20 @@ namespace Elections.Systems
             writer.PropertyName("withinMargin"); writer.Write(pollReleased && summary.WithinMargin);
             writer.PropertyName("resultLabel"); writer.Write(pollReleased ? summary.Label : string.Empty);
             writer.PropertyName("resultDescription"); writer.Write(pollReleased ? summary.Description : string.Empty);
+            writer.PropertyName("ageGroups");
+            writer.ArrayBegin(3);
+            WritePollBreakdown(writer, "teens", "Teens", pollReleased ? state.pollTeenVotesA : 0, pollReleased ? state.pollTeenVotesB : 0, pollReleased ? state.pollTeenUndecided : 0, nameA, nameB);
+            WritePollBreakdown(writer, "adults", "Adults", pollReleased ? state.pollAdultVotesA : 0, pollReleased ? state.pollAdultVotesB : 0, pollReleased ? state.pollAdultUndecided : 0, nameA, nameB);
+            WritePollBreakdown(writer, "elderly", "Elderly", pollReleased ? state.pollElderlyVotesA : 0, pollReleased ? state.pollElderlyVotesB : 0, pollReleased ? state.pollElderlyUndecided : 0, nameA, nameB);
+            writer.ArrayEnd();
+            writer.PropertyName("educationGroups");
+            writer.ArrayBegin(5);
+            WritePollBreakdown(writer, "education0", "Uneducated", pollReleased ? state.pollEducation0VotesA : 0, pollReleased ? state.pollEducation0VotesB : 0, pollReleased ? state.pollEducation0Undecided : 0, nameA, nameB);
+            WritePollBreakdown(writer, "education1", "Poorly educated", pollReleased ? state.pollEducation1VotesA : 0, pollReleased ? state.pollEducation1VotesB : 0, pollReleased ? state.pollEducation1Undecided : 0, nameA, nameB);
+            WritePollBreakdown(writer, "education2", "Educated", pollReleased ? state.pollEducation2VotesA : 0, pollReleased ? state.pollEducation2VotesB : 0, pollReleased ? state.pollEducation2Undecided : 0, nameA, nameB);
+            WritePollBreakdown(writer, "education3", "Well educated", pollReleased ? state.pollEducation3VotesA : 0, pollReleased ? state.pollEducation3VotesB : 0, pollReleased ? state.pollEducation3Undecided : 0, nameA, nameB);
+            WritePollBreakdown(writer, "education4", "Highly educated", pollReleased ? state.pollEducation4VotesA : 0, pollReleased ? state.pollEducation4VotesB : 0, pollReleased ? state.pollEducation4Undecided : 0, nameA, nameB);
+            writer.ArrayEnd();
             writer.TypeEnd();
         }
 
@@ -379,6 +461,30 @@ namespace Elections.Systems
             writer.PropertyName("withinMargin"); writer.Write(false);
             writer.PropertyName("resultLabel"); writer.Write(string.Empty);
             writer.PropertyName("resultDescription"); writer.Write(string.Empty);
+            writer.PropertyName("ageGroups"); writer.ArrayBegin(0); writer.ArrayEnd();
+            writer.PropertyName("educationGroups"); writer.ArrayBegin(0); writer.ArrayEnd();
+            writer.TypeEnd();
+        }
+
+        private static void WritePollBreakdown(IJsonWriter writer, string key, string label, int votesA, int votesB, int undecided, string nameA, string nameB)
+        {
+            ElectionPollSummary summary = ElectionPollUtility.BuildSummary(votesA, votesB, undecided, nameA, nameB);
+
+            writer.TypeBegin("ElectionPollBreakdown");
+            writer.PropertyName("key"); writer.Write(key);
+            writer.PropertyName("label"); writer.Write(label);
+            writer.PropertyName("sampleSize"); writer.Write(summary.Total);
+            writer.PropertyName("votesA"); writer.Write(votesA);
+            writer.PropertyName("votesB"); writer.Write(votesB);
+            writer.PropertyName("undecided"); writer.Write(undecided);
+            writer.PropertyName("percentA"); writer.Write(summary.PercentA);
+            writer.PropertyName("percentB"); writer.Write(summary.PercentB);
+            writer.PropertyName("percentUndecided"); writer.Write(summary.PercentUndecided);
+            writer.PropertyName("marginOfError"); writer.Write(summary.MarginOfError);
+            writer.PropertyName("leaderIndex"); writer.Write(summary.LeaderIndex);
+            writer.PropertyName("withinMargin"); writer.Write(summary.WithinMargin);
+            writer.PropertyName("resultLabel"); writer.Write(summary.Label);
+            writer.PropertyName("resultDescription"); writer.Write(summary.Description);
             writer.TypeEnd();
         }
 
@@ -392,14 +498,14 @@ namespace Elections.Systems
             return ElectionCandidateProfileUtility.BuildBio(EntityManager, candidate, age, education, workType, wealth);
         }
 
-        private static void WriteDonationTiers(IJsonWriter writer)
+        private static void WriteDonationTiers(IJsonWriter writer, int campaignDonationAmount)
         {
             writer.PropertyName("donationTiers");
             writer.ArrayBegin(ElectionDonationTiers.Count);
 
             for (int i = 0; i < ElectionDonationTiers.Count; i++)
             {
-                ElectionDonationTiers.TryGet(i, out ElectionDonationTier tier);
+                ElectionDonationTiers.TryGet(i, campaignDonationAmount, out ElectionDonationTier tier);
                 writer.TypeBegin("ElectionDonationTier");
                 writer.PropertyName("index"); writer.Write(i);
                 writer.PropertyName("amount"); writer.Write(tier.Amount);
@@ -409,6 +515,118 @@ namespace Elections.Systems
             }
 
             writer.ArrayEnd();
+        }
+
+        private static void WriteSupportProgramPanel(IJsonWriter writer, ElectionState state, bool supportProgramsOpen, bool supportProgramUsedToday, bool electionDay)
+        {
+            int cost = ElectionSupportPrograms.GetCost(state.campaignDonationAmount);
+            writer.PropertyName("supportProgramsOpen"); writer.Write(supportProgramsOpen);
+            writer.PropertyName("supportProgramUsedToday"); writer.Write(supportProgramUsedToday);
+            writer.PropertyName("supportProgramUsedTodayLabel"); writer.Write(supportProgramUsedToday ? GetSupportProgramLabel(state.supportProgramIdToday) : string.Empty);
+            writer.PropertyName("supportProgramCost"); writer.Write(cost);
+            writer.PropertyName("supportPrograms");
+            writer.ArrayBegin(ElectionSupportPrograms.Count);
+
+            for (int i = 0; i < ElectionSupportPrograms.Count; i++)
+            {
+                if (!ElectionSupportPrograms.TryGet(i, out ElectionSupportProgramDefinition program))
+                    continue;
+
+                bool active = IsSupportProgramActive(state, program.Type);
+                int currentBonusPercent = GetSupportProgramCurrentBonusPercent(state, program.Type);
+                bool canRun = supportProgramsOpen &&
+                    !supportProgramUsedToday &&
+                    !(program.Type == ElectionSupportProgramType.ElectionDayHoliday && state.electionDayHolidayScheduled);
+                string disabledReason = canRun
+                    ? string.Empty
+                    : GetSupportProgramDisabledReason(state, program.Type, supportProgramsOpen, supportProgramUsedToday, electionDay);
+
+                writer.TypeBegin("ElectionSupportProgram");
+                writer.PropertyName("index"); writer.Write(program.Index);
+                writer.PropertyName("title"); writer.Write(program.Title);
+                writer.PropertyName("description"); writer.Write(program.Description);
+                writer.PropertyName("tooltip"); writer.Write(program.Tooltip);
+                writer.PropertyName("cost"); writer.Write(cost);
+                writer.PropertyName("bonusPercent"); writer.Write(GetSupportProgramBonusPercent(program.Type));
+                writer.PropertyName("currentBonusPercent"); writer.Write(currentBonusPercent);
+                writer.PropertyName("active"); writer.Write(active);
+                writer.PropertyName("canRun"); writer.Write(canRun);
+                writer.PropertyName("disabledReason"); writer.Write(disabledReason);
+                writer.TypeEnd();
+            }
+
+            writer.ArrayEnd();
+        }
+
+        private static bool IsSupportProgramActive(ElectionState state, ElectionSupportProgramType type)
+        {
+            switch (type)
+            {
+                case ElectionSupportProgramType.ElectionDayHoliday:
+                    return state.electionDayHolidayScheduled;
+                case ElectionSupportProgramType.TeenVoterEducation:
+                    return state.teenTurnoutBonusPercent > 0;
+                case ElectionSupportProgramType.AdultVoterEducation:
+                    return state.adultTurnoutBonusPercent > 0;
+                case ElectionSupportProgramType.ElderlyVoterEducation:
+                    return state.elderlyTurnoutBonusPercent > 0;
+                case ElectionSupportProgramType.VoterEducation:
+                    return state.uneducatedTurnoutBonusPercent > 0 ||
+                           state.educatedTurnoutBonusPercent > 0;
+                default:
+                    return false;
+            }
+        }
+
+        private static int GetSupportProgramCurrentBonusPercent(ElectionState state, ElectionSupportProgramType type)
+        {
+            switch (type)
+            {
+                case ElectionSupportProgramType.TeenVoterEducation:
+                    return state.teenTurnoutBonusPercent;
+                case ElectionSupportProgramType.AdultVoterEducation:
+                    return state.adultTurnoutBonusPercent;
+                case ElectionSupportProgramType.ElderlyVoterEducation:
+                    return state.elderlyTurnoutBonusPercent;
+                case ElectionSupportProgramType.VoterEducation:
+                    return math.max(state.uneducatedTurnoutBonusPercent, state.educatedTurnoutBonusPercent);
+                default:
+                    return 0;
+            }
+        }
+
+        private static int GetSupportProgramBonusPercent(ElectionSupportProgramType type)
+        {
+            return type == ElectionSupportProgramType.TeenVoterEducation ||
+                   type == ElectionSupportProgramType.AdultVoterEducation ||
+                   type == ElectionSupportProgramType.ElderlyVoterEducation ||
+                   type == ElectionSupportProgramType.VoterEducation
+                ? ElectionUtility.TurnoutProgramDailyBonusPercent
+                : 0;
+        }
+
+        private static string GetSupportProgramDisabledReason(ElectionState state, ElectionSupportProgramType type, bool supportProgramsOpen, bool supportProgramUsedToday, bool electionDay)
+        {
+            if (electionDay)
+                return "Civic programs are unavailable on election day.";
+
+            if (supportProgramUsedToday)
+                return $"Only one civic program can be funded per day. Today's program is {GetSupportProgramLabel(state.supportProgramIdToday)}.";
+
+            if (type == ElectionSupportProgramType.ElectionDayHoliday && state.electionDayHolidayScheduled)
+                return "Election day is already scheduled as a holiday.";
+
+            if (!supportProgramsOpen)
+                return "Civic programs are available before election day once candidates are selected.";
+
+            return "Civic program unavailable right now.";
+        }
+
+        private static string GetSupportProgramLabel(int programIndex)
+        {
+            return ElectionSupportPrograms.TryGet(programIndex, out ElectionSupportProgramDefinition program)
+                ? program.Title
+                : "a civic program";
         }
 
         private static bool HasPollResults(ElectionState state)
@@ -421,13 +639,44 @@ namespace Elections.Systems
         private static bool IsDonationStage(ElectionCampaignStage stage)
         {
             return stage == ElectionCampaignStage.CandidatesSelected ||
-                   stage == ElectionCampaignStage.PollReleased ||
-                   stage == ElectionCampaignStage.Voting;
+                   stage == ElectionCampaignStage.PollReleased;
+        }
+
+        private bool IsElectionDay(ElectionState state, DateTime now)
+        {
+            ElectionUtility.GetCurrentCalendarDate(World, now, out int year, out int month, out int day);
+            if (state.stage == ElectionCampaignStage.Voting && state.electionDayKey > 0)
+                return ElectionUtility.DayKey(year, month, day) == state.electionDayKey;
+
+            return state.electionYear > 0 &&
+                   state.electionMonth > 0 &&
+                   year == state.electionYear &&
+                   month == state.electionMonth &&
+                   day == 1;
+        }
+
+        private static string FormatElectionDate(ElectionState state)
+        {
+            if (state.stage == ElectionCampaignStage.Voting &&
+                TryGetDateFromDayKey(state.electionDayKey, out int year, out int month, out int day))
+            {
+                return ElectionUtility.FormatDate(year, month, day);
+            }
+
+            return FormatScheduledDate(state.electionYear, state.electionMonth);
         }
 
         private static string FormatScheduledDate(int year, int month)
         {
             return year <= 0 || month <= 0 ? string.Empty : ElectionUtility.FormatDate(year, month, 1);
+        }
+
+        private static bool TryGetDateFromDayKey(int dayKey, out int year, out int month, out int day)
+        {
+            year = dayKey / 10000;
+            month = dayKey / 100 % 100;
+            day = dayKey % 100;
+            return year > 0 && month >= 1 && month <= 12 && day >= 1;
         }
 
         private static void WriteScheduleTimes(IJsonWriter writer)
@@ -494,6 +743,11 @@ namespace Elections.Systems
         private static string GetDonationTierLabel(int index)
         {
             return "Campaign support";
+        }
+
+        private static int GetCampaignBribeAmount(ElectionState state)
+        {
+            return state.campaignBribeAmount > 0 ? state.campaignBribeAmount : ElectionLifecycleSystem.BribeAmount;
         }
 
         private string GetEntityName(Entity entity, string fallback)

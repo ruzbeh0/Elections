@@ -11,7 +11,9 @@ namespace Elections.Systems
         private const string FallbackSourceRoot = "coui://ui-mods/Portraits/";
         private const string DataUriPrefix = "data:image/jpeg;base64,";
         private const int SkinVariantCount = 5;
-        private const int PortraitCount = 20;
+        private const int BasePortraitCount = 20;
+        private const int ExtraPortraitCount = 10;
+        private const int PortraitCount = BasePortraitCount + ExtraPortraitCount;
 
         private static readonly Dictionary<string, string> s_DataUriByFileName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> s_LoggedMissingFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -58,8 +60,40 @@ namespace Elections.Systems
             }
         }
 
+        public static int PickDifferentPortraitIndex(
+            EntityManager entityManager,
+            Entity candidate,
+            int salt,
+            Entity excludedCandidateA,
+            int excludedPortraitIndexA,
+            Entity excludedCandidateB,
+            int excludedPortraitIndexB)
+        {
+            int startIndex = PickPortraitIndex(candidate, salt);
+            for (int offset = 0; offset < PortraitCount; offset++)
+            {
+                int portraitIndex = NormalizePortraitIndex(startIndex + offset);
+                if (!HasSamePortrait(entityManager, candidate, portraitIndex, excludedCandidateA, excludedPortraitIndexA) &&
+                    !HasSamePortrait(entityManager, candidate, portraitIndex, excludedCandidateB, excludedPortraitIndexB))
+                {
+                    return portraitIndex;
+                }
+            }
+
+            return startIndex;
+        }
+
         public static string GetPortraitImageSource(EntityManager entityManager, Entity candidate, int portraitIndex)
         {
+            return GetPortraitImageSource(GetPortraitFileName(entityManager, candidate, portraitIndex));
+        }
+
+        public static string GetPortraitFileName(EntityManager entityManager, Entity candidate, int portraitIndex)
+        {
+            portraitIndex = NormalizePortraitIndex(portraitIndex);
+            if (portraitIndex >= BasePortraitCount)
+                return $"candidate_extra_{portraitIndex - BasePortraitCount:00}.jpg";
+
             string ageKey = portraitIndex < 10 ? "young" : "adult";
             string genderKey = portraitIndex % 10 < 5 ? "f" : "m";
             int skinIndex = portraitIndex % SkinVariantCount;
@@ -76,7 +110,31 @@ namespace Elections.Systems
                 ageKey = randomAgeVariant == 0 ? "adult" : "young";
             }
 
-            string fileName = $"candidate_{ageKey}_{genderKey}_s{skinIndex}.jpg";
+            return $"candidate_{ageKey}_{genderKey}_s{skinIndex}.jpg";
+        }
+
+        public static bool HasSamePortrait(
+            EntityManager entityManager,
+            Entity candidate,
+            int portraitIndex,
+            Entity excludedCandidate,
+            int excludedPortraitIndex)
+        {
+            if (excludedCandidate == Entity.Null || excludedPortraitIndex < 0)
+                return false;
+
+            string fileName = GetPortraitFileName(entityManager, candidate, portraitIndex);
+            string excludedFileName = GetPortraitFileName(entityManager, excludedCandidate, excludedPortraitIndex);
+            return string.Equals(fileName, excludedFileName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static int NormalizePortraitIndex(int portraitIndex)
+        {
+            return (portraitIndex & int.MaxValue) % PortraitCount;
+        }
+
+        private static string GetPortraitImageSource(string fileName)
+        {
             if (TryGetDataUri(fileName, out string dataUri))
                 return dataUri;
 

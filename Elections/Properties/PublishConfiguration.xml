@@ -1,37 +1,69 @@
-﻿<Publish>
+<Publish>
 	<!--Id must be set in order to update existed mod. it is not required for publishing mod for the first time-->
 	<ModId Value="" />
 	<!--Name of the mod to display to players-->
-	<DisplayName Value="Elections" />
+	<DisplayName Value="Elections [RT Module]" />
 	<!--Short description of the mod-->
-	<ShortDescription Value="This is a short description" />
+	<ShortDescription Value="Adds mayoral election campaigns where the winning candidate shapes the city's next year, while the player can influence the race to help their preferred candidate win." />
 	<!--Long description of the mod. Single line or multi line. Supports minimal markdown subset-->
 	<!--LongDescription Value="This is a long description" /-->
 	<LongDescription>
-This is a long description
+Elections adds a mayoral election cycle to the city. Residents can become candidates, campaigns can release polls, voters travel to polling places on election day, and the winning mayor applies a platform effect until the next election.
+
+## Dependencies and Compatibility
+
+**Important:** Elections requires Realistic Trips. This is an RT Module: Realistic Trips owns the calendar, time behavior, voting trips, mayor policy hooks, and special election-day travel requests used by this mod. Custom Chirps is used for election announcements, candidate messages and mayor messages.
+
+## What This Mod Adds
+
+* **Mayoral Campaigns:** Eligible residents are selected as candidates, receive generated profiles and platforms, and campaign before election day.
+* **Campaign Polls:** Polls sample eligible residents and show candidate support, undecided voters, age breakdowns, education breakdowns, and margin of error.
+* **Voting Trips:** On election day, residents can travel to polling places through Realistic Trips. Results are announced after voting closes.
+* **Mayor Effects:** The elected mayor applies a city policy effect until the next term. Platforms can include positive benefits and tradeoffs.
+* **Civic Programs:** The city can fund limited campaign-season programs such as turnout education, an election-day holiday, or strict voting ID proposals.
+* **Campaign Donations and Meetings:** The city can fund campaign donations, mayor outreach meetings, endorsements, and other campaign actions.
+* **Election Events:** Campaigns can trigger chirps, candidate statements, corruption investigations, vote-tampering incidents, victory messages, and mayor transition messages.
+
+## Settings
+
+* **General:** Enable or disable elections and choose whether the Elections button appears in Universal Mod Menu.
+* **Voting:** Configure poll sample size, voting hours, and age-turnout values or country presets.
+* **Campaign:** Use campaign actions such as donations, civic programs, mayor outreach, endorsements, and vote-tampering attempts.
+* **Debug:** Optional debug actions can force a campaign, election day, or poll generation for testing.
 	</LongDescription>
 	<!--Thumbnail-->
 	<Thumbnail Value="Properties/Thumbnail.png" />
 	<!--Screenshot, can be set multiple times-->
-	<Screenshot Value="" />
+	<Screenshot Value="Properties/screenshot1.jpg" />
+	<Screenshot Value="Properties/screenshot2.jpg" />
+	<Screenshot Value="Properties/screenshot3.jpg" />
+	<Screenshot Value="Properties/screenshot4.jpg" />
+	<Screenshot Value="Properties/screenshot5.jpg" />
 	<!--Tag, can be set multiple times-->
 	<Tag Value="" />
 	<!--Link to the forum post where the mod can be discussed-->
-	<ForumLink Value="" />
+	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/elections-mod.1927087/" />
 	<!--Version of the mod-->
-	<ModVersion Value="1.0" />
+	<ModVersion Value="0.1" />
 	<!--Recommended version of the base game to use the mod-->
-	<GameVersion Value="1.0.*" />
+	<GameVersion Value="1.5.*" />
 	<!--Dependency for the mod, can be set multiple times-->
-	<Dependency Id="" />
+	<Dependency Id="77171" />
+	<Dependency Id="121812" />
 	<!--Required DLC, can be set multiple times. Supported values are "Landmark Buildings", "San Fransisco Set", "Beach Properties", "Urban Promenades", "Modern Architecture"-->
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
-	<ChangeLog Value="" />
-	<!--<ChangeLog>
-	</ChangeLog>-->
+	<ChangeLog>
+* Initial release.
+* Adds mayoral campaigns, polls, election-day voting trips, candidate portraits, civic programs, mayor effects, and campaign events.
+* Requires Realistic Trips and Custom Chirps.
+	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
-	<ExternalLink Type="" Url="" />
+	<ExternalLink Type="github" Url="https://github.com/ruzbeh0/Elections" />
+	<ExternalLink Type="discord" Url="https://discord.com/channels/1024242828114673724/1513124497300127764" />
+	<ExternalLink Type="youtube" Url="https://youtu.be/fVCW2Lly_Cw" />
+	<ExternalLink Type="paypal" Url="https://www.paypal.com/paypalme/ruzbeh0" />
+	<ExternalLink Type="kofi" Url="https://ko-fi.com/ruzbeh0" />
 	<!--Supported values Public, Private, Unlisted-->
 	<AccessLevel Value="Public" />
 </Publish>

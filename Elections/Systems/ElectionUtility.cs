@@ -21,6 +21,11 @@ namespace Elections.Systems
         public const int DefaultVotingStartMinute = DefaultVotingStartHour * 60;
         public const int DefaultVotingEndMinute = DefaultVotingEndHour * 60;
         public const int ResultsAnnouncementMinute = ResultsAnnouncementHour * 60;
+        public const int DefaultTeenDailyVotingTurnoutPercent = 36;
+        public const int DefaultAdultDailyVotingTurnoutPercent = 49;
+        public const int DefaultElderlyDailyVotingTurnoutPercent = 58;
+        public const int TurnoutProgramDailyBonusPercent = 10;
+        public const int StrictVotingIdUneducatedWorkerTurnoutPenaltyPercent = 20;
 
         private struct VoterProfile
         {
@@ -28,6 +33,7 @@ namespace Elections.Systems
             public int education;
             public int workType;
             public int wealth;
+            public int happiness;
             public bool elderly;
             public bool student;
             public bool worker;
@@ -95,28 +101,48 @@ namespace Elections.Systems
         public static float GetVoteProbabilityForA(EntityManager entityManager, Entity voter, Citizen voterData, ElectionState state)
         {
             VoterProfile profile = CreateVoterProfile(entityManager, voter, voterData);
+            ElectionEffectDefinition candidateAEffect = ElectionEffects.Get(state.candidateAEffectId, state.candidateANegativeSoftened);
+            ElectionEffectDefinition candidateBEffect = ElectionEffects.Get(state.candidateBEffectId, state.candidateBNegativeSoftened);
 
             float scoreA = CandidateAffinity(profile, state.candidateAAge, state.candidateAEducation, state.candidateAWorkType, state.candidateAWealth) +
-                           PlatformPreference(profile, ElectionEffects.Get(state.candidateAEffectId, state.candidateANegativeSoftened));
+                           PlatformPreference(profile, candidateAEffect) +
+                           ContinuityPreference(profile, candidateAEffect, state);
             float scoreB = CandidateAffinity(profile, state.candidateBAge, state.candidateBEducation, state.candidateBWorkType, state.candidateBWealth) +
-                           PlatformPreference(profile, ElectionEffects.Get(state.candidateBEffectId, state.candidateBNegativeSoftened));
+                           PlatformPreference(profile, candidateBEffect) +
+                           ContinuityPreference(profile, candidateBEffect, state);
 
             float donationInfluence = math.clamp(
-                ElectionDonationTiers.GetBonusForAmount(state.donationA) -
-                ElectionDonationTiers.GetBonusForAmount(state.donationB),
+                ElectionDonationTiers.GetBonusForAmount(state.donationA, state.campaignDonationAmount) -
+                ElectionDonationTiers.GetBonusForAmount(state.donationB, state.campaignDonationAmount),
                 -0.12f,
                 0.12f);
 
+            float endorsementInfluence = GetEndorsementInfluence(profile, state);
             float personalLean = StableVoterLean(voter) * 0.035f;
-            return math.clamp(0.5f + (scoreA - scoreB) * 0.09f + donationInfluence + personalLean, 0.08f, 0.92f);
+            return math.clamp(0.5f + (scoreA - scoreB) * 0.09f + donationInfluence + endorsementInfluence + personalLean, 0.08f, 0.92f);
+        }
+
+        public static float GetVotingTurnoutMultiplier(Citizen citizen)
+        {
+            int happiness = GetCitizenHappiness(citizen);
+            if (happiness > 70)
+                return 1.04f;
+            if (happiness > 55)
+                return 1.0f;
+            if (happiness > 40)
+                return 1.05f;
+            if (happiness > 25)
+                return 1.08f;
+
+            return 0.94f;
         }
 
         public static float GetUndecidedProbability(float probabilityA, ElectionState state)
         {
             float margin = math.abs(probabilityA - 0.5f);
             float donationGap = math.abs(
-                ElectionDonationTiers.GetBonusForAmount(state.donationA) -
-                ElectionDonationTiers.GetBonusForAmount(state.donationB));
+                ElectionDonationTiers.GetBonusForAmount(state.donationA, state.campaignDonationAmount) -
+                ElectionDonationTiers.GetBonusForAmount(state.donationB, state.campaignDonationAmount));
             return math.clamp(0.2f - margin * 0.55f - donationGap * 0.25f, 0.06f, 0.22f);
         }
 
@@ -317,11 +343,17 @@ namespace Elections.Systems
                 education = voterData.GetEducationLevel(),
                 workType = GetWorkType(entityManager, voter),
                 wealth = GetWealthBracket(entityManager, voter),
+                happiness = GetCitizenHappiness(voterData),
                 elderly = age == CitizenAge.Elderly,
                 student = student,
                 worker = worker,
                 hasCar = entityManager.HasComponent<CarKeeper>(voter)
             };
+        }
+
+        private static int GetCitizenHappiness(Citizen citizen)
+        {
+            return (citizen.m_WellBeing + citizen.m_Health) / 2;
         }
 
         private static float CandidateAffinity(VoterProfile profile, int candidateAge, int candidateEducation, int candidateWorkType, int candidateWealth)
@@ -334,8 +366,40 @@ namespace Elections.Systems
 
         private static float PlatformPreference(VoterProfile profile, ElectionEffectDefinition effect)
         {
-            return ImpactPreference(profile, effect.PositiveImpact) +
-                   ImpactPreference(profile, effect.NegativeImpact);
+            float issueIntensity = 1f + math.saturate((55f - profile.happiness) / 55f) * 0.25f;
+            return (ImpactPreference(profile, effect.PositiveImpact) +
+                    ImpactPreference(profile, effect.NegativeImpact)) * issueIntensity;
+        }
+
+        private static float ContinuityPreference(VoterProfile profile, ElectionEffectDefinition effect, ElectionState state)
+        {
+            if (state.mayorEffectId <= 0)
+                return 0f;
+
+            ElectionEffectDefinition mayorEffect = ElectionEffects.Get(state.mayorEffectId, state.mayorNegativeSoftened);
+            float similarity = 0f;
+            if (effect.PositiveImpact.Key == mayorEffect.PositiveImpact.Key)
+                similarity += 0.5f;
+            if (effect.NegativeImpact.Key == mayorEffect.NegativeImpact.Key)
+                similarity += 0.5f;
+
+            float mood = math.clamp((profile.happiness - 50f) / 50f, -1f, 1f);
+            return mood * (similarity - 0.35f) * 0.20f;
+        }
+
+        private static float GetEndorsementInfluence(VoterProfile profile, ElectionState state)
+        {
+            int endorsedIndex = state.mayorEndorsementCandidateIndex;
+            if (endorsedIndex != 0 && endorsedIndex != 1)
+                return 0f;
+
+            Entity endorsedCandidate = endorsedIndex == 0 ? state.candidateA : state.candidateB;
+            if (endorsedCandidate == Entity.Null || state.mayorEndorsementCandidate != endorsedCandidate)
+                return 0f;
+
+            float happyTrust = math.saturate((profile.happiness - 55f) / 45f);
+            float bonus = happyTrust * 0.05f;
+            return endorsedIndex == 0 ? bonus : -bonus;
         }
 
         private static float ImpactPreference(VoterProfile profile, ElectionEffectImpact impact)
@@ -357,6 +421,9 @@ namespace Elections.Systems
             if (impact.ResourceConsumptionMultiplier > 0f && math.abs(impact.ResourceConsumptionMultiplier - 1f) > 0.0001f)
                 return math.clamp(math.abs(impact.ResourceConsumptionMultiplier - 1f) / 0.1f, 0.2f, 1f) * 0.32f;
 
+            if (impact.AccumulatedXpMultiplier > 0f && math.abs(impact.AccumulatedXpMultiplier - 1f) > 0.0001f)
+                return math.clamp(math.abs(impact.AccumulatedXpMultiplier - 1f), 0.2f, 1f) * 0.32f;
+
             return math.clamp(math.abs(impact.Mul) / 0.1f, 0.2f, 1f) * 0.32f;
         }
 
@@ -372,6 +439,7 @@ namespace Elections.Systems
                 case "ExportCost":
                 case "LoanInterest":
                 case "BuildingLevelingCost":
+                case "AccumulatedXP":
                     return profile.worker || profile.wealth >= 3 ? 1.15f : 0.85f;
                 case "CityServiceUpkeep":
                     return profile.wealth <= 1 ? 1.1f : 0.95f;

@@ -28,10 +28,11 @@ namespace Elections
             m_Setting = new Setting(this);
             m_Setting.RegisterInOptionsUI();
             GameManager.instance.localizationManager.AddSource("en-US", new LocaleEN(m_Setting));
+            GameManager.instance.localizationManager.AddSource("pt-BR", new LocalePTBR(m_Setting));
 
 
             AssetDatabase.global.LoadSettings(nameof(Elections), m_Setting, new Setting(this));
-            ElectionDebug.Log($"Settings loaded: EnableElections={m_Setting.EnableElections}, ElectionDayActsLikeSunday={m_Setting.ElectionDayActsLikeSunday}, UseUniversalModMenu={m_Setting.UseUniversalModMenu}, PollSamplePercent={m_Setting.PollSamplePercent}, HourlyVotingAttemptPercent={m_Setting.HourlyVotingAttemptPercent}.");
+            ElectionDebug.Log($"Settings loaded: EnableElections={m_Setting.EnableElections}, UseUniversalModMenu={m_Setting.UseUniversalModMenu}, PollSamplePercent={m_Setting.PollSamplePercent}, DailyTurnout=teen:{m_Setting.TeenDailyVotingTurnoutPercent}/adult:{m_Setting.AdultDailyVotingTurnoutPercent}/elderly:{m_Setting.ElderlyDailyVotingTurnoutPercent}.");
             CandidatePortraitCatalog.WarmupCache();
             ElectionDebug.Log("Candidate portrait cache warmed.");
 

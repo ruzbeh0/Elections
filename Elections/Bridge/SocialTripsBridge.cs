@@ -7,20 +7,28 @@ namespace Elections.Bridge
     internal static class SocialTripsBridge
     {
         private delegate bool TryQueueElectionVoteChirpDelegate(Entity voter, Entity pollingPlace, string candidateName, int chosenCandidate, int electionDayKey);
+        private delegate bool TryQueueElectionVoteChirpWithCandidateDelegate(Entity voter, Entity pollingPlace, Entity candidate, string candidateName, int chosenCandidate, int electionDayKey);
 
         private static bool s_Resolved;
         private static Type s_BridgeType;
         private static TryQueueElectionVoteChirpDelegate s_TryQueueElectionVoteChirp;
+        private static TryQueueElectionVoteChirpWithCandidateDelegate s_TryQueueElectionVoteChirpWithCandidate;
         private static bool s_LoggedFailure;
 
-        public static bool TryQueueElectionVoteChirp(Entity voter, Entity pollingPlace, string candidateName, int chosenCandidate, int electionDayKey)
+        public static bool TryQueueElectionVoteChirp(Entity voter, Entity pollingPlace, Entity candidate, string candidateName, int chosenCandidate, int electionDayKey)
         {
             EnsureResolve();
-            if (s_TryQueueElectionVoteChirp == null)
+            if (s_TryQueueElectionVoteChirpWithCandidate == null &&
+                s_TryQueueElectionVoteChirp == null)
+            {
                 return false;
+            }
 
             try
             {
+                if (s_TryQueueElectionVoteChirpWithCandidate != null)
+                    return s_TryQueueElectionVoteChirpWithCandidate(voter, pollingPlace, candidate, candidateName ?? string.Empty, chosenCandidate, electionDayKey);
+
                 return s_TryQueueElectionVoteChirp(voter, pollingPlace, candidateName ?? string.Empty, chosenCandidate, electionDayKey);
             }
             catch (Exception ex)
@@ -37,7 +45,7 @@ namespace Elections.Bridge
 
         private static void EnsureResolve()
         {
-            if (s_Resolved && s_TryQueueElectionVoteChirp != null)
+            if (s_Resolved && (s_TryQueueElectionVoteChirpWithCandidate != null || s_TryQueueElectionVoteChirp != null))
                 return;
 
             s_Resolved = true;
@@ -53,14 +61,27 @@ namespace Elections.Bridge
                 "TryQueueElectionVoteChirp",
                 BindingFlags.Public | BindingFlags.Static,
                 null,
+                new[] { typeof(Entity), typeof(Entity), typeof(Entity), typeof(string), typeof(int), typeof(int) },
+                null);
+            s_TryQueueElectionVoteChirpWithCandidate = method == null
+                ? null
+                : Delegate.CreateDelegate(typeof(TryQueueElectionVoteChirpWithCandidateDelegate), method, false) as TryQueueElectionVoteChirpWithCandidateDelegate;
+
+            method = s_BridgeType.GetMethod(
+                "TryQueueElectionVoteChirp",
+                BindingFlags.Public | BindingFlags.Static,
+                null,
                 new[] { typeof(Entity), typeof(Entity), typeof(string), typeof(int), typeof(int) },
                 null);
             s_TryQueueElectionVoteChirp = method == null
                 ? null
                 : Delegate.CreateDelegate(typeof(TryQueueElectionVoteChirpDelegate), method, false) as TryQueueElectionVoteChirpDelegate;
 
-            if (s_TryQueueElectionVoteChirp == null)
+            if (s_TryQueueElectionVoteChirpWithCandidate == null &&
+                s_TryQueueElectionVoteChirp == null)
+            {
                 s_Resolved = false;
+            }
         }
 
         private static Type FindType(string fullName)

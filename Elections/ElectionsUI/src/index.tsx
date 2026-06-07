@@ -14,6 +14,19 @@ type DonationTier = {
   label: string;
 };
 
+type SupportProgram = {
+  index: number;
+  title: string;
+  description: string;
+  tooltip: string;
+  cost: number;
+  bonusPercent: number;
+  currentBonusPercent: number;
+  active: boolean;
+  canRun: boolean;
+  disabledReason: string;
+};
+
 type PlatformImpact = {
   value: string;
   label: string;
@@ -35,7 +48,7 @@ type Candidate = {
   donated: boolean;
 };
 
-type Poll = {
+type PollResult = {
   sampleSize: number;
   votesA: number;
   votesB: number;
@@ -48,6 +61,16 @@ type Poll = {
   withinMargin: boolean;
   resultLabel: string;
   resultDescription: string;
+};
+
+type PollBreakdown = PollResult & {
+  key: string;
+  label: string;
+};
+
+type Poll = PollResult & {
+  ageGroups: PollBreakdown[];
+  educationGroups: PollBreakdown[];
 };
 
 type ElectionPanel = {
@@ -65,8 +88,24 @@ type ElectionPanel = {
   donationsOpen: boolean;
   bribesOpen: boolean;
   canBribe: boolean;
+  canEndorse: boolean;
+  endorsementUsed: boolean;
+  endorsedCandidateIndex: number;
+  canTamper: boolean;
+  voteTamperingScheduled: boolean;
+  voteTamperingCandidateIndex: number;
+  canProposeVotingId: boolean;
+  votingIdLawPassed: boolean;
+  votingIdProposalPending: boolean;
   bribeUsedToday: boolean;
+  bribeBlocked: boolean;
+  bribeMeetingPending: boolean;
   bribeCost: number;
+  supportProgramsOpen: boolean;
+  supportProgramUsedToday: boolean;
+  supportProgramUsedTodayLabel: string;
+  supportProgramCost: number;
+  supportPrograms: SupportProgram[];
   pollDate: string;
   electionDate: string;
   votingStartTime: string;
@@ -84,6 +123,8 @@ type ElectionPanel = {
   mayorPlatformImpacts: PlatformImpact[];
   mayorTemporary: boolean;
 };
+
+type PanelSection = "votingSites" | "mayor" | "schedule" | "programs" | "candidates";
 
 const emptyCandidate = (index: number, name: string): Candidate => ({
   index,
@@ -115,8 +156,24 @@ const defaultPanel: ElectionPanel = {
   donationsOpen: false,
   bribesOpen: false,
   canBribe: false,
+  canEndorse: false,
+  endorsementUsed: false,
+  endorsedCandidateIndex: -1,
+  canTamper: false,
+  voteTamperingScheduled: false,
+  voteTamperingCandidateIndex: -1,
+  canProposeVotingId: false,
+  votingIdLawPassed: false,
+  votingIdProposalPending: false,
   bribeUsedToday: false,
+  bribeBlocked: false,
+  bribeMeetingPending: false,
   bribeCost: 5000000,
+  supportProgramsOpen: false,
+  supportProgramUsedToday: false,
+  supportProgramUsedTodayLabel: "",
+  supportProgramCost: 500000,
+  supportPrograms: [],
   pollDate: "",
   electionDate: "",
   votingStartTime: "08:00",
@@ -135,6 +192,8 @@ const defaultPanel: ElectionPanel = {
     withinMargin: false,
     resultLabel: "",
     resultDescription: "",
+    ageGroups: [],
+    educationGroups: [],
   },
   donationTiers: [],
   candidateA: emptyCandidate(0, "Candidate A"),
@@ -164,6 +223,14 @@ const candidateAColor = "#b16cff";
 const candidateBColor = "#62d26f";
 const undecidedColor = "#aeb8c8";
 
+function hasActiveCandidateField(panel: ElectionPanel): boolean {
+  return panel.enabled &&
+    !panel.waitingForPopulation &&
+    panel.candidateA?.exists &&
+    panel.candidateB?.exists &&
+    (panel.stage === "CandidatesSelected" || panel.stage === "PollReleased" || panel.stage === "Voting");
+}
+
 export const register: ModRegistrar = (moduleRegistry) => {
   moduleRegistry.append("GameTopLeft", ElectionsTopLeft);
   moduleRegistry.append("UniversalModMenu", ElectionsUniversalModMenu);
@@ -183,16 +250,63 @@ function ElectionsUniversalModMenu(): ReactElement {
 
 function ElectionsMenu(): ReactElement {
   const [open, setOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState<PanelSection>("votingSites");
   const panel = normalizePanel(useValue(panel$));
   const showVotingLocations = useValue(showVotingLocations$);
   const candidates = useMemo(
     () => [panel.candidateA ?? defaultPanel.candidateA, panel.candidateB ?? defaultPanel.candidateB],
     [panel.candidateA, panel.candidateB]
   );
+  const votingSitesEnabled = panel.enabled && !panel.waitingForPopulation;
+  const menuItems: Array<{ section: PanelSection; label: string; title: string; tooltip: string; disabled?: boolean }> = [
+    {
+      section: "votingSites",
+      label: "View voting sites",
+      title: "Voting sites",
+      tooltip: votingSitesEnabled
+        ? "Show voting locations on the map."
+        : "Voting locations unlock when Elections are enabled and the city reaches the minimum population.",
+      disabled: !votingSitesEnabled,
+    },
+    {
+      section: "mayor",
+      label: "Current mayor panel",
+      title: "Current mayor",
+      tooltip: "Show the current mayor and mayoral actions.",
+    },
+    {
+      section: "schedule",
+      label: "Election schedule",
+      title: "Election schedule",
+      tooltip: "Show election dates, voting hours, results time, and poll status.",
+    },
+    {
+      section: "programs",
+      label: "Civic programs",
+      title: "Civic programs",
+      tooltip: "Fund turnout support programs before election day.",
+    },
+    {
+      section: "candidates",
+      label: "Candidates",
+      title: "Candidates",
+      tooltip: "Show the mayoral candidates and campaign donation controls.",
+    },
+  ];
+  const activeItem = menuItems.find((item) => item.section === activeSection) ?? menuItems[0];
+  const subPanelClass = activeSection === "candidates"
+    ? styles.subPanelWide
+    : activeSection === "mayor"
+      ? styles.subPanelMayor
+    : activeSection === "schedule"
+      ? styles.subPanelMedium
+    : activeSection === "programs"
+      ? styles.subPanelMedium
+      : styles.subPanelNarrow;
 
   return (
     <div className={styles.root}>
-      <Tooltip tooltip="Open the Elections panel. Shows the current mayor, active race, poll status, and campaign donation controls.">
+      <Tooltip tooltip="Open the Elections panel. Shows the current mayor, active race, poll status, and campaign donation controls before election day.">
         <Button
           variant="floating"
           selected={open}
@@ -204,70 +318,54 @@ function ElectionsMenu(): ReactElement {
             setOpen(!open);
           }}
         >
-          <Icon src={icon} tinted={true} className={styles.icon} />
+          <Icon src={icon} tinted={false} className={styles.icon} />
         </Button>
       </Tooltip>
 
       {open && (
-        <div draggable className={styles.panel}>
-          <header className={styles.header}>
-            <Tooltip tooltip="Current election stage. Candidate selection, poll release, and election day are managed by the Elections lifecycle.">
-              <div className={styles.titleBlock}>
-                <span className={styles.title}>Elections</span>
-                <span className={styles.subtitle}>{panel.stageLabel}</span>
-              </div>
-            </Tooltip>
-            <div className={styles.headerActions}>
-              <Tooltip tooltip={panel.enabled
-                ? panel.waitingForPopulation
-                  ? `Voting sites unlock when the city reaches ${formatAmount(panel.minimumPopulation)} population.`
-                  : "Highlight voting locations. During election day, each marker also shows votes cast at that location."
-                : "Voting locations are available when Elections are enabled."}
-              >
+        <div className={styles.menuCluster}>
+          <nav draggable className={styles.sideMenu} aria-label="Election panels">
+            {menuItems.map((item) => (
+              <Tooltip tooltip={item.tooltip} key={item.section}>
                 <button
                   type="button"
-                  disabled={!panel.enabled || panel.waitingForPopulation}
-                  aria-label="Highlight voting locations"
-                  aria-pressed={showVotingLocations}
-                  className={`${styles.votingLocationsButton} ${showVotingLocations ? styles.votingLocationsButtonActive : ""}`}
+                  disabled={item.disabled}
+                  aria-label={item.label}
+                  aria-pressed={activeSection === item.section}
+                  className={`${styles.sideMenuButton} ${activeSection === item.section ? styles.sideMenuButtonActive : ""}`}
                   onClick={() => {
-                    if (panel.enabled && !panel.waitingForPopulation) {
-                      trigger(mod.id, "setShowVotingLocations", !showVotingLocations);
+                    if (item.disabled) {
+                      return;
+                    }
+
+                    setActiveSection(item.section);
+                    if (item.section === "votingSites" && !showVotingLocations) {
+                      trigger(mod.id, "setShowVotingLocations", true);
                     }
                   }}
                 >
-                  <BallotBoxIcon />
-                  <span className={styles.votingLocationsButtonLabel}>Voting sites</span>
+                  <PanelMenuIcon section={item.section} />
                 </button>
               </Tooltip>
-            </div>
-          </header>
-
-          {!panel.enabled && (
-            <div className={styles.notice}>Elections are disabled in mod settings.</div>
-          )}
-          {panel.enabled && panel.waitingForPopulation && (
-            <div className={styles.notice}>
-              Elections will start when the city reaches {formatAmount(panel.minimumPopulation)} population. Current population: {formatAmount(panel.currentPopulation)}.
-            </div>
-          )}
-
-          <section className={styles.topLevel}>
-            {panel.mayorName && (
-              <MayorSection panel={panel} />
-            )}
-            <ScheduleSection panel={panel} />
-          </section>
-
-          <section className={styles.candidateGrid}>
-            {candidates.map((candidate) => (
-              <CandidateCard
-                key={candidate.index}
-                candidate={candidate}
-                donationTiers={panel.donationTiers ?? []}
-                donationsOpen={panel.donationsOpen}
-              />
             ))}
+          </nav>
+
+          <section draggable className={`${styles.subPanel} ${subPanelClass}`}>
+            <header className={styles.subPanelHeader}>
+              <div className={styles.titleBlock}>
+                <span className={styles.title}>{activeItem.title}</span>
+              </div>
+            </header>
+
+            <main className={styles.subPanelContent}>
+              <PanelNotices panel={panel} />
+              <ActivePanelContent
+                activeSection={activeSection}
+                panel={panel}
+                candidates={candidates}
+                showVotingLocations={showVotingLocations}
+              />
+            </main>
           </section>
         </div>
       )}
@@ -275,17 +373,192 @@ function ElectionsMenu(): ReactElement {
   );
 }
 
-function BallotBoxIcon(): ReactElement {
+function PanelMenuIcon(props: { section: PanelSection }): ReactElement {
+  if (props.section === "votingSites") {
+    return <img src={icon} className={`${styles.sideMenuIcon} ${styles.sideMenuImageIcon}`} alt="" />;
+  }
+
+  if (props.section === "mayor") {
+    return (
+      <svg className={`${styles.sideMenuIcon} ${styles.sideMenuGlyphIcon}`} viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 20h10" />
+        <path d="M8 17h8l1-9-3 2.4L12 5l-2 5.4L7 8l1 9Z" />
+        <path d="M9 13h6" />
+      </svg>
+    );
+  }
+
+  if (props.section === "schedule") {
+    return (
+      <svg className={`${styles.sideMenuIcon} ${styles.sideMenuGlyphIcon}`} viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 3v4" />
+        <path d="M17 3v4" />
+        <path d="M4.5 8h15" />
+        <path d="M6 5h12a1.5 1.5 0 0 1 1.5 1.5v12A1.5 1.5 0 0 1 18 20H6a1.5 1.5 0 0 1-1.5-1.5v-12A1.5 1.5 0 0 1 6 5Z" />
+        <path d="M8 12h2" />
+        <path d="M12 12h2" />
+        <path d="M8 16h2" />
+        <path d="M12 16h2" />
+      </svg>
+    );
+  }
+
+  if (props.section === "programs") {
+    return (
+      <svg className={`${styles.sideMenuIcon} ${styles.sideMenuGlyphIcon}`} viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 12h3l7-4v8l-7-4H4Z" />
+        <path d="M14 9.5c2 0 3 1.1 3 2.5s-1 2.5-3 2.5" />
+        <path d="M7 12v5a1.5 1.5 0 0 0 1.5 1.5H10" />
+        <path d="M19 9a5 5 0 0 1 0 6" />
+      </svg>
+    );
+  }
+
   return (
-    <svg className={styles.ballotIcon} viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M5 11h14l-1 10H6L5 11Z" />
-      <path d="M8 11l1.2-3h9.6l1.2 3" />
-      <path d="M9 15h6" />
-      <path d="M11 7.4 15.8 5l1.5 3.1-4.8 2.4Z" />
-      <path d="M4 7.3c1.8-.2 3.2.2 4.4 1.3l2.1 1.9" />
-      <path d="M8.3 8.6 10 7.1" />
+    <svg className={`${styles.sideMenuIcon} ${styles.sideMenuGlyphIcon}`} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+      <path d="M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+      <path d="M4 20v-2.2C4 15.7 5.7 14 7.8 14h.4c2.1 0 3.8 1.7 3.8 3.8V20" />
+      <path d="M12 20v-2.2c0-2.1 1.7-3.8 3.8-3.8h.4c2.1 0 3.8 1.7 3.8 3.8V20" />
     </svg>
   );
+}
+
+function PanelNotices(props: { panel: ElectionPanel }): ReactElement {
+  const { panel } = props;
+
+  return (
+    <>
+      {!panel.enabled && (
+        <div className={styles.notice}>Elections are disabled in mod settings.</div>
+      )}
+      {panel.enabled && panel.waitingForPopulation && (
+        <div className={styles.notice}>
+          Elections will start when the city reaches {formatAmount(panel.minimumPopulation)} population. Current population: {formatAmount(panel.currentPopulation)}.
+        </div>
+      )}
+    </>
+  );
+}
+
+function ActivePanelContent(props: {
+  activeSection: PanelSection;
+  panel: ElectionPanel;
+  candidates: Candidate[];
+  showVotingLocations: boolean;
+}): ReactElement {
+  const { activeSection, panel, candidates, showVotingLocations } = props;
+
+  if (activeSection === "mayor") {
+    return panel.mayorName ? (
+      <MayorSection panel={panel} />
+    ) : (
+      <div className={styles.notice}>No mayor has been selected yet.</div>
+    );
+  }
+
+  if (activeSection === "schedule") {
+    return <ScheduleSection panel={panel} />;
+  }
+
+  if (activeSection === "programs") {
+    return <SupportProgramsPanel panel={panel} />;
+  }
+
+  if (activeSection === "candidates") {
+    if (!hasActiveCandidateField(panel)) {
+      return <div className={styles.notice}>There are no candidates right now.</div>;
+    }
+
+    return (
+      <section className={styles.candidateStack}>
+        {candidates.map((candidate) => (
+          <CandidateCard
+            key={candidate.index}
+            candidate={candidate}
+            donationTiers={panel.donationTiers ?? []}
+            donationsOpen={panel.donationsOpen}
+          />
+        ))}
+      </section>
+    );
+  }
+
+  return (
+    <VotingSitesPanel
+      panel={panel}
+      showVotingLocations={showVotingLocations}
+    />
+  );
+}
+
+function VotingSitesPanel(props: {
+  panel: ElectionPanel;
+  showVotingLocations: boolean;
+}): ReactElement {
+  const { panel, showVotingLocations } = props;
+  const canShowLocations = panel.enabled && !panel.waitingForPopulation;
+  const electionDay = panel.stage === "Voting";
+
+  return (
+    <section className={styles.votingSitesPanel}>
+      <div className={styles.sectionHeader}>
+        <Tooltip tooltip="Voting-site overlay status. On election day, map markers include live vote counts for each location.">
+          <span>Voting sites</span>
+        </Tooltip>
+        <Tooltip tooltip={showVotingLocations ? "Voting-site overlay is visible." : "Voting-site overlay is hidden."}>
+          <strong>{showVotingLocations ? "Overlay visible" : "Overlay hidden"}</strong>
+        </Tooltip>
+      </div>
+
+      <div className={styles.votingSitesSummary}>
+        <Tooltip tooltip="Election date and voting window for the active mayoral race.">
+          <div className={styles.votingSitesStatus}>
+            <span>Election</span>
+            <strong>
+              {panel.electionDate
+                ? `${panel.electionDate} ${panel.votingStartTime || "08:00"}-${panel.votingEndTime || "17:00"}`
+                : "Pending"}
+            </strong>
+          </div>
+        </Tooltip>
+        <Tooltip tooltip="Live vote counts appear only during the voting phase.">
+          <div className={styles.votingSitesStatus}>
+            <span>Map markers</span>
+            <strong>{electionDay ? "Live results" : "Voting locations"}</strong>
+          </div>
+        </Tooltip>
+      </div>
+
+      <Tooltip tooltip={canShowLocations
+        ? showVotingLocations
+          ? "Hide voting locations on the map."
+          : "Show voting locations on the map."
+        : "Voting locations unlock when Elections are enabled and the city reaches the minimum population."}
+      >
+        <button
+          type="button"
+          disabled={!canShowLocations}
+          aria-pressed={showVotingLocations}
+          className={`${styles.votingLocationsButton} ${showVotingLocations ? styles.votingLocationsButtonActive : ""}`}
+          onClick={() => {
+            if (canShowLocations) {
+              trigger(mod.id, "setShowVotingLocations", !showVotingLocations);
+            }
+          }}
+        >
+          <BallotBoxIcon />
+          <span className={styles.votingLocationsButtonLabel}>
+            {showVotingLocations ? "Hide voting sites" : "View voting sites"}
+          </span>
+        </button>
+      </Tooltip>
+    </section>
+  );
+}
+
+function BallotBoxIcon(): ReactElement {
+  return <img src={icon} className={styles.ballotIcon} alt="" />;
 }
 
 function Info(props: { label: string; value: string; tooltip: string }): ReactElement {
@@ -301,6 +574,7 @@ function Info(props: { label: string; value: string; tooltip: string }): ReactEl
 
 function ScheduleSection(props: { panel: ElectionPanel }): ReactElement {
   const { panel } = props;
+  const [pollTab, setPollTab] = useState<"overall" | "age" | "education">("overall");
   const votingWindow = panel.votingStartTime && panel.votingEndTime
     ? `${panel.votingStartTime}-${panel.votingEndTime}`
     : "Pending";
@@ -353,36 +627,55 @@ function ScheduleSection(props: { panel: ElectionPanel }): ReactElement {
           </Tooltip>
           {panel.pollReleased && (
             <Tooltip tooltip="Number of eligible residents sampled by the campaign poll.">
-              <strong className={styles.pollSample}>{formatAmount(panel.poll.sampleSize)} sampled</strong>
+              <strong className={styles.pollSample}>
+                <SampleSizeLabel value={panel.poll.sampleSize} />
+              </strong>
             </Tooltip>
           )}
         </div>
 
         {panel.pollReleased ? (
           <>
-            <Tooltip tooltip={panel.poll.resultDescription || "Poll read based on the sample and margin of error."}>
-              <div className={styles.pollReadout}>
-                <strong>{panel.poll.resultLabel || "Poll released"}</strong>
-                <span>+/-{panel.poll.marginOfError}% margin of error</span>
-              </div>
-            </Tooltip>
-            <div className={styles.pollRows}>
-              <PollRow
-                label={panel.candidateA.name}
-                value={panel.poll.percentA}
-                color={candidateAColor}
-              />
-              <PollRow
-                label={panel.candidateB.name}
-                value={panel.poll.percentB}
-                color={candidateBColor}
-              />
-              <PollRow
-                label="Undecided"
-                value={panel.poll.percentUndecided}
-                color={undecidedColor}
-              />
+            <div className={styles.pollTabs} role="tablist" aria-label="Poll breakdown">
+              {[
+                { key: "overall" as const, label: "Overall" },
+                { key: "age" as const, label: "Age" },
+                { key: "education" as const, label: "Education" },
+              ].map((tab) => (
+                <Tooltip tooltip={`Show ${tab.label.toLowerCase()} poll results.`} key={tab.key}>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={pollTab === tab.key}
+                    className={`${styles.pollTabButton} ${pollTab === tab.key ? styles.pollTabButtonActive : ""}`}
+                    onClick={() => setPollTab(tab.key)}
+                  >
+                    {tab.label}
+                  </button>
+                </Tooltip>
+              ))}
             </div>
+            {pollTab === "overall" && (
+              <PollResultView
+                poll={panel.poll}
+                candidateAName={panel.candidateA.name}
+                candidateBName={panel.candidateB.name}
+              />
+            )}
+            {pollTab === "age" && (
+              <PollBreakdownList
+                groups={panel.poll.ageGroups}
+                candidateAName={panel.candidateA.name}
+                candidateBName={panel.candidateB.name}
+              />
+            )}
+            {pollTab === "education" && (
+              <PollBreakdownList
+                groups={panel.poll.educationGroups}
+                candidateAName={panel.candidateA.name}
+                candidateBName={panel.candidateB.name}
+              />
+            )}
           </>
         ) : (
           <div className={styles.notice}>
@@ -396,15 +689,321 @@ function ScheduleSection(props: { panel: ElectionPanel }): ReactElement {
   );
 }
 
+function PollRows(props: {
+  poll: PollResult;
+  candidateAName: string;
+  candidateBName: string;
+}): ReactElement {
+  const { poll, candidateAName, candidateBName } = props;
+
+  return (
+    <div className={styles.pollRows}>
+      <PollRow
+        label={candidateAName}
+        value={poll.percentA}
+        color={candidateAColor}
+      />
+      <PollRow
+        label={candidateBName}
+        value={poll.percentB}
+        color={candidateBColor}
+      />
+      <PollRow
+        label="Undecided"
+        value={poll.percentUndecided}
+        color={undecidedColor}
+      />
+    </div>
+  );
+}
+
+function SampleSizeLabel(props: { value: number }): ReactElement {
+  return (
+    <span className={styles.sampleSizeLabel}>
+      <span>{formatAmount(props.value)}</span>
+      <span className={styles.sampleSizeWord}>sampled</span>
+    </span>
+  );
+}
+
+function PollResultView(props: {
+  poll: PollResult;
+  candidateAName: string;
+  candidateBName: string;
+}): ReactElement {
+  const { poll, candidateAName, candidateBName } = props;
+
+  return (
+    <>
+      <Tooltip tooltip={poll.resultDescription || "Poll read based on the sample and margin of error."}>
+        <div className={styles.pollReadout}>
+          <strong>{poll.resultLabel || "Poll released"}</strong>
+          <span className={styles.pollReadoutMeta}>
+            <SampleSizeLabel value={poll.sampleSize} />
+            <span className={styles.pollMetaSeparator}>|</span>
+            <span>+/-{poll.marginOfError}%</span>
+          </span>
+        </div>
+      </Tooltip>
+      <PollRows
+        poll={poll}
+        candidateAName={candidateAName}
+        candidateBName={candidateBName}
+      />
+    </>
+  );
+}
+
+function PollBreakdownList(props: {
+  groups: PollBreakdown[];
+  candidateAName: string;
+  candidateBName: string;
+}): ReactElement {
+  const groups = Array.isArray(props.groups) ? props.groups : [];
+
+  return (
+    <div className={styles.pollBreakdownList}>
+      {groups.map((group) => (
+        <PollBreakdownCard
+          key={group.key || group.label}
+          group={group}
+          candidateAName={props.candidateAName}
+          candidateBName={props.candidateBName}
+        />
+      ))}
+      {!groups.length && (
+        <div className={styles.notice}>No poll breakdown data is available.</div>
+      )}
+    </div>
+  );
+}
+
+function PollBreakdownCard(props: {
+  group: PollBreakdown;
+  candidateAName: string;
+  candidateBName: string;
+}): ReactElement {
+  const { group, candidateAName, candidateBName } = props;
+
+  return (
+    <article className={styles.pollBreakdownCard}>
+      <Tooltip tooltip={group.resultDescription || "Poll read for this sampled group."}>
+        <div className={styles.pollBreakdownHeader}>
+          <span className={styles.pollBreakdownTitle}>{group.label}</span>
+          <span className={styles.pollBreakdownMeta}>
+            <SampleSizeLabel value={group.sampleSize} />
+            <span className={styles.pollMetaSeparator}>|</span>
+            <span>+/-{group.marginOfError}%</span>
+          </span>
+        </div>
+      </Tooltip>
+      <PollRows
+        poll={group}
+        candidateAName={candidateAName}
+        candidateBName={candidateBName}
+      />
+    </article>
+  );
+}
+
+function SupportProgramsPanel(props: { panel: ElectionPanel }): ReactElement {
+  const { panel } = props;
+  const programs = Array.isArray(panel.supportPrograms) ? panel.supportPrograms : [];
+  const fallbackReason = panel.stage === "Voting"
+    ? "Civic programs are unavailable on election day."
+    : panel.supportProgramUsedToday
+      ? `Only one civic program can be funded per day. Today's program is ${panel.supportProgramUsedTodayLabel || "already selected"}.`
+      : "Civic programs are available before election day once candidates are selected.";
+
+  return (
+    <section className={styles.supportProgramsPanel}>
+      <div className={styles.sectionHeader}>
+        <Tooltip tooltip="Civic programs can be funded once per day before election day.">
+          <span>Civic programs</span>
+        </Tooltip>
+        <Tooltip tooltip="Each civic program costs half of the current campaign donation value.">
+          <strong>{formatAmount(panel.supportProgramCost)} each</strong>
+        </Tooltip>
+      </div>
+
+      {panel.supportProgramUsedToday && (
+        <Tooltip tooltip="The daily civic program slot refreshes on the next calendar day.">
+          <div className={styles.notice}>Today's program: {panel.supportProgramUsedTodayLabel || "selected"}</div>
+        </Tooltip>
+      )}
+
+      <div className={styles.supportProgramList}>
+        {programs.map((program) => {
+          const status = program.index === 0
+            ? program.active ? "Holiday scheduled" : "Not scheduled"
+            : `Current bonus +${program.currentBonusPercent || 0}%`;
+          const tooltip = program.canRun
+            ? program.tooltip
+            : program.disabledReason || program.tooltip || fallbackReason;
+
+          return (
+            <article
+              className={`${styles.supportProgramCard} ${program.active ? styles.supportProgramCardActive : ""}`}
+              key={program.index}
+            >
+              <div className={styles.supportProgramInfo}>
+                <Tooltip tooltip={program.tooltip || program.description}>
+                  <div>
+                    <span className={styles.supportProgramTitle}>{program.title}</span>
+                    <span className={styles.supportProgramDescription}>{program.description}</span>
+                  </div>
+                </Tooltip>
+                <Tooltip tooltip={program.index === 0 ? "Holiday scheduling status." : "Accumulated daily turnout bonus for this voter group."}>
+                  <strong className={styles.supportProgramStatus}>{status}</strong>
+                </Tooltip>
+              </div>
+              <Tooltip tooltip={tooltip}>
+                <Button
+                  variant="flat"
+                  className={program.canRun ? styles.supportProgramButton : `${styles.supportProgramButton} ${styles.supportProgramButtonDisabled}`}
+                  disabled={!program.canRun}
+                  aria-disabled={!program.canRun}
+                  onSelect={() => {
+                    if (program.canRun) {
+                      trigger(mod.id, "runSupportProgram", program.index);
+                    }
+                  }}
+                >
+                  <strong>{program.canRun ? "Fund" : program.active && program.index === 0 ? "Scheduled" : "Unavailable"}</strong>
+                </Button>
+              </Tooltip>
+            </article>
+          );
+        })}
+      </div>
+
+      {!programs.length && (
+        <div className={styles.notice}>Civic programs are unavailable right now.</div>
+      )}
+      {!panel.supportProgramsOpen && programs.length > 0 && (
+        <div className={styles.helpText}>{fallbackReason}</div>
+      )}
+    </section>
+  );
+}
+
 function MayorSection(props: { panel: ElectionPanel }): ReactElement {
   const { panel } = props;
-  const [bribeTarget, setBribeTarget] = useState(0);
-  const [bribeMenuOpen, setBribeMenuOpen] = useState(false);
-  const selectedBribeTarget = bribeTarget === 1 ? 1 : 0;
-  const bribeOptions = [
-    `Convince ${panel.candidateA?.name || "Candidate A"} to change their platform`,
-    `Convince ${panel.candidateB?.name || "Candidate B"} to change their platform`,
+  const activeCandidateField = hasActiveCandidateField(panel);
+  const candidateAName = panel.candidateA?.name || "Candidate A";
+  const candidateBName = panel.candidateB?.name || "Candidate B";
+  const endorsedName = panel.endorsedCandidateIndex === 0
+    ? candidateAName
+    : panel.endorsedCandidateIndex === 1
+      ? candidateBName
+      : "a candidate";
+  const tamperBeneficiaryName = panel.voteTamperingCandidateIndex === 0
+    ? candidateAName
+    : panel.voteTamperingCandidateIndex === 1
+      ? candidateBName
+      : "a candidate";
+  const bribeStatus = panel.bribeMeetingPending
+    ? "Pending"
+    : "";
+  const votingIdStatus = panel.votingIdProposalPending
+    ? "Pending"
+    : panel.votingIdLawPassed
+      ? "Passed"
+      : "";
+  const mayorActions = [
+    {
+      kind: "bribe" as const,
+      candidateIndex: 0,
+      title: activeCandidateField ? `Platform meeting: ${candidateAName}` : "Platform meeting",
+      description: "The mayor will attempt to convince the candidate to soften their platform.",
+      buttonLabel: "Bribe",
+      status: bribeStatus,
+      disabled: !panel.canBribe,
+    },
+    {
+      kind: "bribe" as const,
+      candidateIndex: 1,
+      title: activeCandidateField ? `Platform meeting: ${candidateBName}` : "Platform meeting",
+      description: "The mayor will attempt to convince the candidate to soften their platform.",
+      buttonLabel: "Bribe",
+      status: bribeStatus,
+      disabled: !panel.canBribe,
+    },
+    {
+      kind: "endorse" as const,
+      candidateIndex: 0,
+      title: panel.endorsementUsed && panel.endorsedCandidateIndex === 0
+        ? `Endorsed ${candidateAName}`
+        : `Endorse ${candidateAName}`,
+      description: "Spend city funds to have the mayor endorse this candidate.",
+      buttonLabel: "Endorse",
+      status: panel.endorsementUsed && panel.endorsedCandidateIndex === 0 ? "Endorsed" : "",
+      disabled: !panel.canEndorse || panel.endorsementUsed,
+    },
+    {
+      kind: "endorse" as const,
+      candidateIndex: 1,
+      title: panel.endorsementUsed && panel.endorsedCandidateIndex === 1
+        ? `Endorsed ${candidateBName}`
+        : `Endorse ${candidateBName}`,
+      description: "Spend city funds to have the mayor endorse this candidate.",
+      buttonLabel: "Endorse",
+      status: panel.endorsementUsed && panel.endorsedCandidateIndex === 1 ? "Endorsed" : "",
+      disabled: !panel.canEndorse || panel.endorsementUsed,
+    },
+    {
+      kind: "tamper" as const,
+      candidateIndex: 0,
+      title: panel.voteTamperingScheduled && panel.voteTamperingCandidateIndex === 0
+        ? `Vote-count operation planned for ${candidateAName}`
+        : `Tamper with vote count for ${candidateAName}`,
+      description: "Spend city funds to arrange a late election-day disruption.",
+      buttonLabel: "Tamper",
+      status: panel.voteTamperingScheduled && panel.voteTamperingCandidateIndex === 0 ? "Planned" : "",
+      disabled: !panel.canTamper || panel.voteTamperingScheduled,
+    },
+    {
+      kind: "tamper" as const,
+      candidateIndex: 1,
+      title: panel.voteTamperingScheduled && panel.voteTamperingCandidateIndex === 1
+        ? `Vote-count operation planned for ${candidateBName}`
+        : `Tamper with vote count for ${candidateBName}`,
+      description: "Spend city funds to arrange a late election-day disruption.",
+      buttonLabel: "Tamper",
+      status: panel.voteTamperingScheduled && panel.voteTamperingCandidateIndex === 1 ? "Planned" : "",
+      disabled: !panel.canTamper || panel.voteTamperingScheduled,
+    },
+    {
+      kind: "votingId" as const,
+      candidateIndex: -1,
+      title: "Strict voting ID requirements",
+      description: "It would reduce turnout for uneducated workers.",
+      buttonLabel: "Propose",
+      status: votingIdStatus,
+      disabled: !panel.canProposeVotingId || panel.votingIdLawPassed || panel.votingIdProposalPending,
+    },
   ];
+  const getActionUnavailableReason = (kind: "bribe" | "endorse" | "tamper" | "votingId"): string => kind === "endorse" && panel.endorsementUsed
+    ? `The mayor already endorsed ${endorsedName} this election cycle.`
+    : kind === "tamper" && panel.voteTamperingScheduled
+      ? `A vote-count operation is already planned for ${tamperBeneficiaryName} this election cycle.`
+    : kind === "votingId" && panel.votingIdLawPassed
+      ? "The stricter voting ID proposal has already passed for this election cycle."
+    : kind === "votingId" && panel.votingIdProposalPending
+      ? "The mayor is waiting for the voting ID proposal outcome."
+    : panel.stage === "Voting"
+    ? "Mayor campaign actions are unavailable on election day."
+    : panel.bribeMeetingPending
+      ? "The mayor is trying to schedule this candidate meeting."
+      : panel.bribeBlocked || panel.bribeUsedToday
+        ? "The mayor's schedule is blocked after today's campaign action."
+        : panel.waitingForPopulation
+          ? "Mayor campaign actions unlock when Elections start."
+          : !activeCandidateField
+          ? "There are no candidates right now."
+          : !panel.donationsOpen
+            ? "Mayor campaign actions are available during the campaign before election day."
+            : "Mayor campaign action unavailable right now.";
 
   return (
     <section className={styles.mayorCard}>
@@ -446,64 +1045,74 @@ function MayorSection(props: { panel: ElectionPanel }): ReactElement {
           <p>{panel.mayorEffectDescription}</p>
         </div>
       </Tooltip>
-      {panel.bribesOpen && (
-        <div className={styles.bribeBlock}>
-          <Tooltip tooltip="Choose which candidate the mayor should pressure into changing platform. The bribe costs city funds and can be attempted once per in-game day.">
-            <div className={styles.bribeDropdown}>
-              <Button
-                variant="flat"
-                className={panel.canBribe ? styles.bribeSelectButton : `${styles.bribeSelectButton} ${styles.bribeButtonDisabled}`}
-                disabled={!panel.canBribe}
-                aria-disabled={!panel.canBribe}
-                onSelect={() => {
-                  if (panel.canBribe) {
-                    setBribeMenuOpen((value) => !value);
-                  }
-                }}
-              >
-                <span>{bribeOptions[selectedBribeTarget]}</span>
-              </Button>
-              {bribeMenuOpen && panel.canBribe && (
-                <div className={styles.bribeMenu}>
-                  {bribeOptions.map((option, index) => (
-                    <Button
-                      variant="flat"
-                      className={styles.bribeOptionButton}
-                      selected={index === selectedBribeTarget}
-                      key={`${option}-${index}`}
-                      onSelect={() => {
-                        setBribeTarget(index);
-                        setBribeMenuOpen(false);
-                      }}
-                    >
-                      <span>{option}</span>
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </div>
+      <div className={styles.bribeBlock}>
+        <div className={styles.sectionHeader}>
+          <Tooltip tooltip="Mayor campaign actions are available before election day.">
+            <span>Mayor campaign actions</span>
           </Tooltip>
-          <Tooltip tooltip="Spend city funds to attempt the selected mayoral bribe. Success chance is 25%.">
-            <Button
-              variant="flat"
-              className={panel.canBribe ? styles.bribeButton : `${styles.bribeButton} ${styles.bribeButtonDisabled}`}
-              disabled={!panel.canBribe}
-              aria-disabled={!panel.canBribe}
-              onSelect={() => {
-                if (panel.canBribe) {
-                  setBribeMenuOpen(false);
-                  trigger(mod.id, "bribeMayor", selectedBribeTarget);
-                }
-              }}
-            >
-              <strong>Bribe {formatAmount(panel.bribeCost || 5000000)}</strong>
-            </Button>
+          <Tooltip tooltip="Each mayor campaign action uses the current mayor campaign action cost.">
+            <strong>{formatAmount(panel.bribeCost || 5000000)} each</strong>
           </Tooltip>
-          {panel.bribeUsedToday && (
-            <div className={styles.helpText}>Candidate meeting attempted today.</div>
-          )}
         </div>
-      )}
+        <div className={styles.mayorActionList}>
+          {mayorActions.map((action) => {
+            const actionEnabled = activeCandidateField &&
+              ((action.kind === "bribe" && panel.canBribe) ||
+                (action.kind === "endorse" && panel.canEndorse && !panel.endorsementUsed) ||
+                (action.kind === "tamper" && panel.canTamper && !panel.voteTamperingScheduled) ||
+                (action.kind === "votingId" && panel.canProposeVotingId && !panel.votingIdLawPassed && !panel.votingIdProposalPending));
+            const disabledReason = getActionUnavailableReason(action.kind);
+            const tooltip = actionEnabled
+              ? action.description
+              : disabledReason;
+
+            return (
+              <article className={styles.mayorActionCard} key={`${action.kind}-${action.candidateIndex}`}>
+                <div className={styles.mayorActionInfo}>
+                  <Tooltip tooltip={action.description}>
+                    <div>
+                      <span className={styles.mayorActionTitle}>{action.title}</span>
+                      <span className={styles.mayorActionDescription}>{action.description}</span>
+                    </div>
+                  </Tooltip>
+                  {action.status && (
+                    <Tooltip tooltip="Current state of this mayor campaign action.">
+                      <strong className={styles.mayorActionStatus}>{action.status}</strong>
+                    </Tooltip>
+                  )}
+                </div>
+                <Tooltip tooltip={tooltip}>
+                  <Button
+                    variant="flat"
+                    className={actionEnabled ? styles.mayorActionButton : `${styles.mayorActionButton} ${styles.bribeButtonDisabled}`}
+                    disabled={!actionEnabled}
+                    aria-disabled={!actionEnabled}
+                    onSelect={() => {
+                      if (actionEnabled) {
+                        if (action.kind === "votingId") {
+                          trigger(mod.id, "proposeVotingIdLaw");
+                        } else {
+                          trigger(
+                            mod.id,
+                            action.kind === "endorse"
+                              ? "endorseCandidate"
+                              : action.kind === "tamper"
+                                ? "tamperVotes"
+                                : "bribeMayor",
+                            action.candidateIndex
+                          );
+                        }
+                      }
+                    }}
+                  >
+                    <strong>{actionEnabled ? action.buttonLabel : "Unavailable"}</strong>
+                  </Button>
+                </Tooltip>
+              </article>
+            );
+          })}
+        </div>
+      </div>
     </section>
   );
 }
@@ -567,13 +1176,13 @@ function CandidateCard(props: {
 
       <div className={styles.donationBlock}>
         <div className={styles.donationHeader}>
-          <Tooltip tooltip="City-funded campaign support. Donations are available while the mayoral race is active and candidates have been selected.">
+          <Tooltip tooltip="City-funded campaign support. Donations are available while the mayoral race is active before election day.">
             <span>Campaign donation</span>
           </Tooltip>
         </div>
         {donationTier && (
           <Tooltip
-            tooltip={`Donate ${formatAmount(donationTier.amount)} of city funds to support this candidate's campaign.`}
+            tooltip={`Donate ${formatAmount(donationTier.amount)} of city funds to support this candidate's campaign before election day.`}
           >
             <Button
               variant="flat"
@@ -591,8 +1200,8 @@ function CandidateCard(props: {
           </Tooltip>
         )}
         {!donationsOpen && (
-          <Tooltip tooltip="Donations are available when an active campaign has selected candidates.">
-            <div className={styles.helpText}>Donations open when candidates are selected.</div>
+          <Tooltip tooltip="Donations are available when an active campaign has selected candidates before election day.">
+            <div className={styles.helpText}>Donations open before election day once candidates are selected.</div>
           </Tooltip>
         )}
       </div>
@@ -667,6 +1276,8 @@ function normalizePanel(panel: ElectionPanel | undefined | null): ElectionPanel 
     ...defaultPanel.poll,
     ...(source.poll ?? {}),
   };
+  poll.ageGroups = Array.isArray(poll.ageGroups) ? poll.ageGroups : [];
+  poll.educationGroups = Array.isArray(poll.educationGroups) ? poll.educationGroups : [];
 
   return {
     ...defaultPanel,
@@ -675,6 +1286,7 @@ function normalizePanel(panel: ElectionPanel | undefined | null): ElectionPanel 
     candidateA,
     candidateB,
     donationTiers: Array.isArray(source.donationTiers) ? source.donationTiers : [],
+    supportPrograms: Array.isArray(source.supportPrograms) ? source.supportPrograms : [],
     mayorPlatformImpacts: Array.isArray(source.mayorPlatformImpacts) ? source.mayorPlatformImpacts : [],
   };
 }

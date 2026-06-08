@@ -1,7 +1,7 @@
 import { type ModRegistrar } from "cs2/modding";
 import { bindValue, trigger, useValue } from "cs2/api";
 import { Button, Icon, Tooltip } from "cs2/ui";
-import { type ReactElement, useMemo, useState } from "react";
+import { type ReactElement, useEffect, useMemo, useState } from "react";
 
 import icon from "images/elections.svg";
 import mod from "../mod.json";
@@ -223,6 +223,47 @@ const candidateAColor = "#b16cff";
 const candidateBColor = "#62d26f";
 const undecidedColor = "#aeb8c8";
 
+type ElectionsMenuState = {
+  open: boolean;
+  activeSection: PanelSection;
+};
+
+const defaultMenuState: ElectionsMenuState = {
+  open: false,
+  activeSection: "votingSites",
+};
+
+let menuState = defaultMenuState;
+const menuStateListeners = new Set<() => void>();
+
+function subscribeToMenuState(listener: () => void): () => void {
+  menuStateListeners.add(listener);
+  return () => menuStateListeners.delete(listener);
+}
+
+function getMenuStateSnapshot(): ElectionsMenuState {
+  return menuState;
+}
+
+function setMenuState(update: Partial<ElectionsMenuState>): void {
+  menuState = {
+    ...menuState,
+    ...update,
+  };
+
+  menuStateListeners.forEach((listener) => listener());
+}
+
+function useElectionsMenuState(): ElectionsMenuState {
+  const [snapshot, setSnapshot] = useState(getMenuStateSnapshot);
+
+  useEffect(() => subscribeToMenuState(() => {
+    setSnapshot(getMenuStateSnapshot());
+  }), []);
+
+  return snapshot;
+}
+
 function hasActiveCandidateField(panel: ElectionPanel): boolean {
   return panel.enabled &&
     !panel.waitingForPopulation &&
@@ -239,24 +280,75 @@ export const register: ModRegistrar = (moduleRegistry) => {
 function ElectionsTopLeft(): ReactElement {
   const useUniversalModMenu = useValue(useUniversalModMenu$);
 
-  return <>{!useUniversalModMenu && <ElectionsMenu />}</>;
+  return (
+    <>
+      {!useUniversalModMenu && (
+        <div className={styles.root}>
+          <ElectionsMenuButton />
+        </div>
+      )}
+      <ElectionsDetachedPanelHost />
+    </>
+  );
 }
 
 function ElectionsUniversalModMenu(): ReactElement {
   const useUniversalModMenu = useValue(useUniversalModMenu$);
 
-  return <>{useUniversalModMenu && <ElectionsMenu />}</>;
+  return (
+    <>
+      {useUniversalModMenu && (
+        <div className={styles.root}>
+          <ElectionsMenuButton />
+        </div>
+      )}
+    </>
+  );
 }
 
-function ElectionsMenu(): ReactElement {
-  const [open, setOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState<PanelSection>("votingSites");
+function ElectionsDetachedPanelHost(): ReactElement {
+  return (
+    <div className={`${styles.root} ${styles.detachedRoot}`}>
+      <ElectionsMenuPanel />
+    </div>
+  );
+}
+
+function ElectionsMenuButton(): ReactElement {
+  const { open } = useElectionsMenuState();
+
+  return (
+    <Tooltip tooltip="Open the Elections panel. Shows the current mayor, active race, poll status, and campaign donation controls before election day.">
+      <Button
+        variant="floating"
+        selected={open}
+        aria-label="Open Elections"
+        onSelect={() => {
+          if (open) {
+            trigger(mod.id, "setShowVotingLocations", false);
+          }
+          setMenuState({ open: !open });
+        }}
+      >
+        <Icon src={icon} tinted={false} className={styles.icon} />
+      </Button>
+    </Tooltip>
+  );
+}
+
+function ElectionsMenuPanel(): ReactElement | null {
+  const { open, activeSection } = useElectionsMenuState();
   const panel = normalizePanel(useValue(panel$));
   const showVotingLocations = useValue(showVotingLocations$);
   const candidates = useMemo(
     () => [panel.candidateA ?? defaultPanel.candidateA, panel.candidateB ?? defaultPanel.candidateB],
     [panel.candidateA, panel.candidateB]
   );
+
+  if (!open) {
+    return null;
+  }
+
   const votingSitesEnabled = panel.enabled && !panel.waitingForPopulation;
   const menuItems: Array<{ section: PanelSection; label: string; title: string; tooltip: string; disabled?: boolean }> = [
     {
@@ -305,70 +397,50 @@ function ElectionsMenu(): ReactElement {
       : styles.subPanelNarrow;
 
   return (
-    <div className={styles.root}>
-      <Tooltip tooltip="Open the Elections panel. Shows the current mayor, active race, poll status, and campaign donation controls before election day.">
-        <Button
-          variant="floating"
-          selected={open}
-          aria-label="Open Elections"
-          onSelect={() => {
-            if (open) {
-              trigger(mod.id, "setShowVotingLocations", false);
-            }
-            setOpen(!open);
-          }}
-        >
-          <Icon src={icon} tinted={false} className={styles.icon} />
-        </Button>
-      </Tooltip>
+    <div className={styles.menuCluster}>
+      <nav draggable className={styles.sideMenu} aria-label="Election panels">
+        {menuItems.map((item) => (
+          <Tooltip tooltip={item.tooltip} key={item.section}>
+            <button
+              type="button"
+              disabled={item.disabled}
+              aria-label={item.label}
+              aria-pressed={activeSection === item.section}
+              className={`${styles.sideMenuButton} ${activeSection === item.section ? styles.sideMenuButtonActive : ""}`}
+              onClick={() => {
+                if (item.disabled) {
+                  return;
+                }
 
-      {open && (
-        <div className={styles.menuCluster}>
-          <nav draggable className={styles.sideMenu} aria-label="Election panels">
-            {menuItems.map((item) => (
-              <Tooltip tooltip={item.tooltip} key={item.section}>
-                <button
-                  type="button"
-                  disabled={item.disabled}
-                  aria-label={item.label}
-                  aria-pressed={activeSection === item.section}
-                  className={`${styles.sideMenuButton} ${activeSection === item.section ? styles.sideMenuButtonActive : ""}`}
-                  onClick={() => {
-                    if (item.disabled) {
-                      return;
-                    }
+                setMenuState({ activeSection: item.section });
+                if (item.section === "votingSites" && !showVotingLocations) {
+                  trigger(mod.id, "setShowVotingLocations", true);
+                }
+              }}
+            >
+              <PanelMenuIcon section={item.section} />
+            </button>
+          </Tooltip>
+        ))}
+      </nav>
 
-                    setActiveSection(item.section);
-                    if (item.section === "votingSites" && !showVotingLocations) {
-                      trigger(mod.id, "setShowVotingLocations", true);
-                    }
-                  }}
-                >
-                  <PanelMenuIcon section={item.section} />
-                </button>
-              </Tooltip>
-            ))}
-          </nav>
+      <section draggable className={`${styles.subPanel} ${subPanelClass}`}>
+        <header className={styles.subPanelHeader}>
+          <div className={styles.titleBlock}>
+            <span className={styles.title}>{activeItem.title}</span>
+          </div>
+        </header>
 
-          <section draggable className={`${styles.subPanel} ${subPanelClass}`}>
-            <header className={styles.subPanelHeader}>
-              <div className={styles.titleBlock}>
-                <span className={styles.title}>{activeItem.title}</span>
-              </div>
-            </header>
-
-            <main className={styles.subPanelContent}>
-              <PanelNotices panel={panel} />
-              <ActivePanelContent
-                activeSection={activeSection}
-                panel={panel}
-                candidates={candidates}
-                showVotingLocations={showVotingLocations}
-              />
-            </main>
-          </section>
-        </div>
-      )}
+        <main className={styles.subPanelContent}>
+          <PanelNotices panel={panel} />
+          <ActivePanelContent
+            activeSection={activeSection}
+            panel={panel}
+            candidates={candidates}
+            showVotingLocations={showVotingLocations}
+          />
+        </main>
+      </section>
     </div>
   );
 }
@@ -853,7 +925,7 @@ function SupportProgramsPanel(props: { panel: ElectionPanel }): ReactElement {
                     <span className={styles.supportProgramDescription}>{program.description}</span>
                   </div>
                 </Tooltip>
-                <Tooltip tooltip={program.index === 0 ? "Holiday scheduling status." : "Accumulated daily turnout bonus for this voter group."}>
+                <Tooltip tooltip={program.index === 0 ? "Holiday scheduling status." : "Accumulated election turnout bonus for this voter group."}>
                   <strong className={styles.supportProgramStatus}>{status}</strong>
                 </Tooltip>
               </div>

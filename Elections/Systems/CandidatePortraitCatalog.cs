@@ -12,8 +12,13 @@ namespace Elections.Systems
         private const string DataUriPrefix = "data:image/jpeg;base64,";
         private const int SkinVariantCount = 5;
         private const int BasePortraitCount = 20;
-        private const int ExtraPortraitCount = 10;
+        private const int ExtraPortraitCount = 20;
         private const int PortraitCount = BasePortraitCount + ExtraPortraitCount;
+        private static readonly bool[] s_ExtraPortraitIsMale =
+        {
+            true, false, true, false, true, false, true, false, true, false,
+            true, false, false, true, false, true, false, true, false, true
+        };
 
         private static readonly Dictionary<string, string> s_DataUriByFileName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> s_LoggedMissingFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -92,7 +97,13 @@ namespace Elections.Systems
         {
             portraitIndex = NormalizePortraitIndex(portraitIndex);
             if (portraitIndex >= BasePortraitCount)
-                return $"candidate_extra_{portraitIndex - BasePortraitCount:00}.jpg";
+            {
+                int extraIndex = portraitIndex - BasePortraitCount;
+                if (TryGetCitizenIsMale(entityManager, candidate, out bool isMale))
+                    extraIndex = PickGenderMatchedExtraPortraitIndex(extraIndex, isMale);
+
+                return $"candidate_extra_{extraIndex:00}.jpg";
+            }
 
             string ageKey = portraitIndex < 10 ? "young" : "adult";
             string genderKey = portraitIndex % 10 < 5 ? "f" : "m";
@@ -113,6 +124,37 @@ namespace Elections.Systems
             return $"candidate_{ageKey}_{genderKey}_s{skinIndex}.jpg";
         }
 
+        private static bool TryGetCitizenIsMale(EntityManager entityManager, Entity candidate, out bool isMale)
+        {
+            isMale = false;
+            if (candidate == Entity.Null ||
+                !entityManager.Exists(candidate) ||
+                !entityManager.HasComponent<Citizen>(candidate))
+            {
+                return false;
+            }
+
+            Citizen citizen = entityManager.GetComponentData<Citizen>(candidate);
+            isMale = (citizen.m_State & CitizenFlags.Male) != CitizenFlags.None;
+            return true;
+        }
+
+        private static int PickGenderMatchedExtraPortraitIndex(int extraIndex, bool isMale)
+        {
+            extraIndex = NormalizeExtraPortraitIndex(extraIndex);
+            for (int offset = 0; offset < ExtraPortraitCount; offset++)
+            {
+                int candidateIndex = (extraIndex + offset) % ExtraPortraitCount;
+                if (candidateIndex < s_ExtraPortraitIsMale.Length &&
+                    s_ExtraPortraitIsMale[candidateIndex] == isMale)
+                {
+                    return candidateIndex;
+                }
+            }
+
+            return extraIndex;
+        }
+
         public static bool HasSamePortrait(
             EntityManager entityManager,
             Entity candidate,
@@ -131,6 +173,11 @@ namespace Elections.Systems
         public static int NormalizePortraitIndex(int portraitIndex)
         {
             return (portraitIndex & int.MaxValue) % PortraitCount;
+        }
+
+        private static int NormalizeExtraPortraitIndex(int extraIndex)
+        {
+            return (extraIndex & int.MaxValue) % ExtraPortraitCount;
         }
 
         private static string GetPortraitImageSource(string fileName)

@@ -101,6 +101,7 @@ namespace Elections.Systems
                 markers = markers.AsArray(),
                 showVoteCounts = showVoteCounts,
                 zoomLevel = m_CameraUpdateSystem.zoom,
+                markerScale = math.clamp((Mod.m_Setting?.VotingSiteOverlayScalePercent ?? 120) / 100f, 1f, 2f),
                 cameraRight = cameraRight,
                 cameraUp = cameraUp,
                 cameraPosition = cameraPosition
@@ -228,6 +229,7 @@ namespace Elections.Systems
             [ReadOnly] public NativeArray<VotingLocationMarker> markers;
             public bool showVoteCounts;
             public float zoomLevel;
+            public float markerScale;
             public float3 cameraRight;
             public float3 cameraUp;
             public float3 cameraPosition;
@@ -238,7 +240,8 @@ namespace Elections.Systems
                 float normalizedZoom = math.pow(rawZoom, 0.68f);
                 const float visualScale = 1.265f;
                 float thickness = math.lerp(3.0f, 21.0f, normalizedZoom) * visualScale;
-                float badgeSize = thickness * 3.3f;
+                float markerThickness = thickness * markerScale;
+                float badgeSize = thickness * 3.3f * markerScale;
                 float markerHeight = math.lerp(14f, 54f, normalizedZoom);
                 float anchorHeight = math.lerp(2.0f, 8.0f, normalizedZoom);
                 float cameraNudge = math.lerp(8f, 26f, normalizedZoom);
@@ -263,7 +266,7 @@ namespace Elections.Systems
                     DrawLeader(anchor + toCamera * (thickness * 0.6f), center, badgeSize, thickness, right);
                     DrawLocationAnchor(anchor + toCamera * (thickness * 0.65f), thickness, right);
 
-                    DrawBallotMarker(center, badgeSize, thickness, right, up, marker.votesA, marker.votesB, showVoteCounts);
+                    DrawBallotMarker(center, badgeSize, markerThickness, right, up, marker.votesA, marker.votesB, showVoteCounts);
 
                     if (showVoteCounts)
                     {
@@ -274,7 +277,7 @@ namespace Elections.Systems
                             marker.votesB,
                             new Color(0.05f, 0.10f, 0.17f, 1f),
                             new Color(0.94f, 0.98f, 1f, 1f),
-                            thickness,
+                            markerThickness,
                             right,
                             up);
                     }

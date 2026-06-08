@@ -94,6 +94,12 @@ namespace Elections.Bridge
             }
         }
 
+        public static bool SupportsChirpWith2Targets()
+        {
+            EnsureResolve();
+            return s_PostChirpWith2Targets != null && s_DepartmentEnumType != null;
+        }
+
         public static bool PostChirpWith3Targets(string text, DepartmentAccountBridge department, Entity targetEntity, Entity targetEntity2, Entity targetEntity3, string senderName)
         {
             EnsureResolve();
@@ -111,6 +117,12 @@ namespace Elections.Bridge
                 LogFailureOnce(ex);
                 return false;
             }
+        }
+
+        public static bool SupportsChirpWith3Targets()
+        {
+            EnsureResolve();
+            return s_PostChirpWith3Targets != null && s_DepartmentEnumType != null;
         }
 
         public static bool PostChirpFromEntity(string text, Entity citizenSenderEntity, Entity targetEntity, string senderName)

@@ -24,7 +24,6 @@ namespace Elections.Systems
         public const int DefaultTeenDailyVotingTurnoutPercent = 36;
         public const int DefaultAdultDailyVotingTurnoutPercent = 49;
         public const int DefaultElderlyDailyVotingTurnoutPercent = 58;
-        public const int TurnoutProgramDailyBonusPercent = 10;
         public const int StrictVotingIdUneducatedWorkerTurnoutPenaltyPercent = 20;
 
         private struct VoterProfile

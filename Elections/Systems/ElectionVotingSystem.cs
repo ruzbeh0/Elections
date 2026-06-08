@@ -4,6 +4,7 @@ using Game;
 using Game.Buildings;
 using Game.Citizens;
 using Game.Common;
+using Game.Companies;
 using Game.Prefabs;
 using Game.Simulation;
 using Game.Tools;
@@ -38,6 +39,7 @@ namespace Elections.Systems
         private bool m_LoggedNoPollingPlaces;
         private int m_SocialVoteChirpDayKey;
         private int m_SocialVoteChirpCount;
+        private readonly List<Entity> m_PollingPlaces = new List<Entity>(64);
 
         public override int GetUpdateInterval(SystemUpdatePhase phase)
         {
@@ -187,7 +189,10 @@ namespace Elections.Systems
                 1,
                 100);
             float votingHours = math.max(1f, (state.votingEndMinute - state.votingStartMinute) / 60f);
-            float updateHours = kUpdateInterval / (float)TimeSystem.kTicksPerDay * 24f;
+            float weightedVotingHours = GetWeightedVotingHours(state.votingStartMinute, state.votingEndMinute);
+            float updateHours = kUpdateInterval / (float)RealisticTripsBridge.GetTicksPerDay() * 24f;
+            int minuteOfDay = ElectionUtility.MinuteOfDay(now);
+            float votingHourChanceWeight = GetVotingHourChanceWeight(minuteOfDay, state.votingStartMinute, state.votingEndMinute);
             bool sundayMode = state.electionDayHolidayScheduled;
             int eligibleCount = 0;
             int teenEligibleCount = 0;
@@ -196,8 +201,11 @@ namespace Elections.Systems
             int randomSelectedCount = 0;
             int alreadyTrackedCount = 0;
             int blockedByWorkCount = 0;
+            int adjustedWorkWindowCount = 0;
+            int noAvailableWorkWindowCount = 0;
             int rejectedByBridgeCount = 0;
             int requestedCount = 0;
+            float weightedAvailableHoursTotal = 0f;
 
             using (NativeArray<Entity> citizens = m_AvailableCitizenQuery.ToEntityArray(Allocator.Temp))
             using (NativeArray<Citizen> citizenData = m_AvailableCitizenQuery.ToComponentDataArray<Citizen>(Allocator.Temp))
@@ -230,7 +238,6 @@ namespace Elections.Systems
                         GetEducationDailyTurnoutBonusPercent(state, data.GetEducationLevel()),
                         1,
                         100);
-                    float hourlyChance = dailyTurnout / votingHours;
                     float turnoutMultiplier = ElectionUtility.GetVotingTurnoutMultiplier(data);
                     if (state.strictVotingIdLawPassed &&
                         data.GetEducationLevel() <= 0 &&
@@ -239,7 +246,37 @@ namespace Elections.Systems
                         turnoutMultiplier *= 1f - ElectionUtility.StrictVotingIdUneducatedWorkerTurnoutPenaltyPercent / 100f;
                     }
 
-                    float chancePerUpdate = math.saturate(hourlyChance / 100f * updateHours * turnoutMultiplier);
+                    int workStartMinute = 0;
+                    int workEndMinute = 0;
+                    bool hasWorkWindow = !sundayMode && TryGetWorkWindow(citizen, out workStartMinute, out workEndMinute);
+                    if (hasWorkWindow && IsMinuteInWorkWindow(minuteOfDay, workStartMinute, workEndMinute))
+                    {
+                        blockedByWorkCount++;
+                        continue;
+                    }
+
+                    float weightedAvailableHours = sundayMode
+                        ? weightedVotingHours
+                        : GetWeightedAvailableVotingHours(
+                            hasWorkWindow,
+                            workStartMinute,
+                            workEndMinute,
+                            state.votingStartMinute,
+                            state.votingEndMinute,
+                            weightedVotingHours);
+                    if (weightedAvailableHours <= 0f)
+                    {
+                        noAvailableWorkWindowCount++;
+                        continue;
+                    }
+
+                    weightedAvailableHoursTotal += weightedAvailableHours;
+                    if (!sundayMode && weightedAvailableHours < weightedVotingHours - 0.001f)
+                        adjustedWorkWindowCount++;
+
+                    float dailyProbability = math.saturate(dailyTurnout / 100f * turnoutMultiplier);
+                    float weightedUpdateHours = updateHours * votingHourChanceWeight;
+                    float chancePerUpdate = GetElectionChancePerUpdate(dailyProbability, weightedUpdateHours, weightedAvailableHours);
                     Unity.Mathematics.Random random = CreateRandom(citizen, state.electionDayKey, (int)m_SimulationSystem.frameIndex);
                     if (random.NextFloat() > chancePerUpdate)
                         continue;
@@ -254,12 +291,6 @@ namespace Elections.Systems
                     if (!RealisticTripsBridge.CanRequestTrip(citizen, pollingPlace))
                     {
                         rejectedByBridgeCount++;
-                        continue;
-                    }
-
-                    if (!sundayMode && !RealisticTripsBridge.IsCitizenOutsideWorkHours(citizen))
-                    {
-                        blockedByWorkCount++;
                         continue;
                     }
 
@@ -282,8 +313,152 @@ namespace Elections.Systems
                     requestedCount++;
                 }
 
-                ElectionDebug.Log($"Voting trip request update: date={ElectionUtility.FormatCurrentDate(World, now)} {now:HH:mm}, pollingPlaces={pollingPlaces.Count}, availableResidents={citizens.Length}, eligibleResidents={eligibleCount}, eligibleByAge=teen:{teenEligibleCount}/adult:{adultEligibleCount}/elderly:{elderlyEligibleCount}, dailyTurnoutByAge=teen:{teenDailyTurnout}/adult:{adultDailyTurnout}/elderly:{elderlyDailyTurnout}, dailyTurnoutBonusByEducation=uneducated:{state.uneducatedTurnoutBonusPercent}/poorlyEducated:{state.educatedTurnoutBonusPercent}, votingHours={votingHours:0.##}, selectedByChance={randomSelectedCount}, alreadyTracked={alreadyTrackedCount}, blockedByWork={blockedByWorkCount}, rejectedByBridge={rejectedByBridgeCount}, requestedThisUpdate={requestedCount}, totalRequests={state.voteRequests}, holidayMode={sundayMode}, visitDurationMinutes={kMinVotingVisitMinutes:0}-{kMaxVotingVisitMinutes:0}.");
+                int chanceEligibleCount = math.max(0, eligibleCount - blockedByWorkCount - noAvailableWorkWindowCount);
+                float averageWeightedAvailableHours = chanceEligibleCount > 0 ? weightedAvailableHoursTotal / chanceEligibleCount : 0f;
+                ElectionDebug.Log($"Voting trip request update: date={ElectionUtility.FormatCurrentDate(World, now)} {now:HH:mm}, pollingPlaces={pollingPlaces.Count}, availableResidents={citizens.Length}, eligibleResidents={eligibleCount}, eligibleByAge=teen:{teenEligibleCount}/adult:{adultEligibleCount}/elderly:{elderlyEligibleCount}, dailyTurnoutByAge=teen:{teenDailyTurnout}/adult:{adultDailyTurnout}/elderly:{elderlyDailyTurnout}, dailyTurnoutBonusByEducation=uneducated:{state.uneducatedTurnoutBonusPercent}/poorlyEducated:{state.educatedTurnoutBonusPercent}, votingHours={votingHours:0.##}, weightedVotingHours={weightedVotingHours:0.##}, averageWeightedAvailableHours={averageWeightedAvailableHours:0.##}, votingHourChanceWeight={votingHourChanceWeight:0.###}, selectedByChance={randomSelectedCount}, alreadyTracked={alreadyTrackedCount}, blockedByWork={blockedByWorkCount}, workWindowAdjusted={adjustedWorkWindowCount}, noAvailableWorkWindow={noAvailableWorkWindowCount}, rejectedByBridge={rejectedByBridgeCount}, requestedThisUpdate={requestedCount}, totalRequests={state.voteRequests}, holidayMode={sundayMode}, visitDurationMinutes={kMinVotingVisitMinutes:0}-{kMaxVotingVisitMinutes:0}.");
             }
+        }
+
+        private static float GetVotingHourChanceWeight(int minuteOfDay, int votingStartMinute, int votingEndMinute)
+        {
+            if (votingEndMinute - votingStartMinute < 120)
+                return 1f;
+
+            int lastHourStartMinute = votingEndMinute - 60;
+            int previousHourStartMinute = votingEndMinute - 120;
+            if (minuteOfDay >= lastHourStartMinute && minuteOfDay < votingEndMinute)
+                return 1f / 3f;
+
+            if (minuteOfDay >= previousHourStartMinute && minuteOfDay < lastHourStartMinute)
+                return 5f / 3f;
+
+            return 1f;
+        }
+
+        private static float GetElectionChancePerUpdate(float electionProbability, float weightedUpdateHours, float weightedAvailableHours)
+        {
+            electionProbability = math.saturate(electionProbability);
+            if (electionProbability <= 0f || weightedUpdateHours <= 0f || weightedAvailableHours <= 0f)
+                return 0f;
+
+            if (electionProbability >= 1f)
+                return 1f;
+
+            float exponent = math.max(0f, weightedUpdateHours / weightedAvailableHours);
+            return math.saturate(1f - math.pow(1f - electionProbability, exponent));
+        }
+
+        private static bool IsMinuteInWorkWindow(int minuteOfDay, int workStartMinute, int workEndMinute)
+        {
+            if (workStartMinute == workEndMinute)
+                return false;
+
+            if (workStartMinute < workEndMinute)
+                return minuteOfDay >= workStartMinute && minuteOfDay < workEndMinute;
+
+            return minuteOfDay >= workStartMinute || minuteOfDay < workEndMinute;
+        }
+
+        private static float GetWeightedAvailableVotingHours(bool hasWorkWindow, int workStartMinute, int workEndMinute, int votingStartMinute, int votingEndMinute, float weightedVotingHours)
+        {
+            if (!hasWorkWindow)
+                return weightedVotingHours;
+
+            float workOverlapHours = GetWeightedWorkOverlapHours(votingStartMinute, votingEndMinute, workStartMinute, workEndMinute);
+            return math.max(0f, weightedVotingHours - workOverlapHours);
+        }
+
+        private bool TryGetWorkWindow(Entity citizen, out int workStartMinute, out int workEndMinute)
+        {
+            workStartMinute = 0;
+            workEndMinute = 0;
+
+            if (RealisticTripsBridge.TryGetCitizenWorkWindow(
+                    EntityManager,
+                    citizen,
+                    out bool dayOff,
+                    out float goToWork,
+                    out float endWork))
+            {
+                if (dayOff || goToWork < 0f || endWork < 0f)
+                    return false;
+
+                workStartMinute = NormalizedDayToMinute(goToWork);
+                workEndMinute = NormalizedDayToMinute(endWork);
+                return workStartMinute != workEndMinute;
+            }
+
+            if (!EntityManager.HasComponent<Worker>(citizen))
+                return false;
+
+            Worker worker = EntityManager.GetComponentData<Worker>(citizen);
+            switch (worker.m_Shift)
+            {
+                case Workshift.Evening:
+                    workStartMinute = 14 * 60;
+                    workEndMinute = 22 * 60;
+                    return true;
+                case Workshift.Night:
+                    workStartMinute = 22 * 60;
+                    workEndMinute = 6 * 60;
+                    return true;
+                default:
+                    workStartMinute = 8 * 60;
+                    workEndMinute = 17 * 60;
+                    return true;
+            }
+        }
+
+        private static int NormalizedDayToMinute(float normalizedTime)
+        {
+            if (normalizedTime <= 0f)
+                return 0;
+
+            if (normalizedTime >= 1f)
+                return 24 * 60;
+
+            return math.clamp((int)math.round(normalizedTime * 24f * 60f), 0, 24 * 60);
+        }
+
+        private static float GetWeightedVotingHours(int votingStartMinute, int votingEndMinute)
+        {
+            return math.max(1f / 60f, GetWeightedIntervalHours(votingStartMinute, votingEndMinute, votingStartMinute, votingEndMinute));
+        }
+
+        private static float GetWeightedWorkOverlapHours(int votingStartMinute, int votingEndMinute, int workStartMinute, int workEndMinute)
+        {
+            if (workStartMinute == workEndMinute)
+                return 0f;
+
+            if (workStartMinute < workEndMinute)
+                return GetWeightedIntervalHours(workStartMinute, workEndMinute, votingStartMinute, votingEndMinute);
+
+            return GetWeightedIntervalHours(0, workEndMinute, votingStartMinute, votingEndMinute) +
+                   GetWeightedIntervalHours(workStartMinute, 24 * 60, votingStartMinute, votingEndMinute);
+        }
+
+        private static float GetWeightedIntervalHours(int intervalStartMinute, int intervalEndMinute, int votingStartMinute, int votingEndMinute)
+        {
+            int startMinute = math.max(intervalStartMinute, votingStartMinute);
+            int endMinute = math.min(intervalEndMinute, votingEndMinute);
+            if (endMinute <= startMinute)
+                return 0f;
+
+            if (votingEndMinute - votingStartMinute < 120)
+                return (endMinute - startMinute) / 60f;
+
+            int lastHourStartMinute = votingEndMinute - 60;
+            int previousHourStartMinute = votingEndMinute - 120;
+            return GetWeightedSegmentHours(startMinute, endMinute, votingStartMinute, previousHourStartMinute, 1f) +
+                   GetWeightedSegmentHours(startMinute, endMinute, previousHourStartMinute, lastHourStartMinute, 5f / 3f) +
+                   GetWeightedSegmentHours(startMinute, endMinute, lastHourStartMinute, votingEndMinute, 1f / 3f);
+        }
+
+        private static float GetWeightedSegmentHours(int intervalStartMinute, int intervalEndMinute, int segmentStartMinute, int segmentEndMinute, float weight)
+        {
+            int startMinute = math.max(intervalStartMinute, segmentStartMinute);
+            int endMinute = math.min(intervalEndMinute, segmentEndMinute);
+            return endMinute > startMinute ? (endMinute - startMinute) / 60f * weight : 0f;
         }
 
         private static int GetDailyVotingAttemptPercent(CitizenAge age, int teenDailyTurnout, int adultDailyTurnout, int elderlyDailyTurnout)
@@ -552,12 +727,12 @@ namespace Elections.Systems
 
         private List<Entity> GetPollingPlaces()
         {
-            List<Entity> pollingPlaces = new List<Entity>(64);
-            AddPollingPlaces(m_SchoolQuery, pollingPlaces);
-            AddPollingPlaces(m_WelfareQuery, pollingPlaces);
-            AddPollingPlaces(m_AdminQuery, pollingPlaces);
-            AddPollingPlaces(m_PostQuery, pollingPlaces);
-            return pollingPlaces;
+            m_PollingPlaces.Clear();
+            AddPollingPlaces(m_SchoolQuery, m_PollingPlaces);
+            AddPollingPlaces(m_WelfareQuery, m_PollingPlaces);
+            AddPollingPlaces(m_AdminQuery, m_PollingPlaces);
+            AddPollingPlaces(m_PostQuery, m_PollingPlaces);
+            return m_PollingPlaces;
         }
 
         private static void AddPollingPlaces(EntityQuery query, List<Entity> pollingPlaces)

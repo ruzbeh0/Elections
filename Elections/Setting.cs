@@ -61,6 +61,10 @@ namespace Elections
         [SettingsUISetter(typeof(Setting), nameof(SetUseUniversalModMenu))]
         public bool UseUniversalModMenu { get; set; }
 
+        [SettingsUISlider(min = 100, max = 200, step = 5, scalarMultiplier = 1, unit = Unit.kPercentage)]
+        [SettingsUISection(kSection, kGeneralGroup)]
+        public int VotingSiteOverlayScalePercent { get; set; } = 120;
+
         [SettingsUISlider(min = 1, max = 10, step = 1, scalarMultiplier = 1, unit = Unit.kPercentage)]
         [SettingsUISection(kSection, kVotingGroup)]
         public int PollSamplePercent { get; set; }
@@ -154,6 +158,7 @@ namespace Elections
         {
             EnableElections = true;
             UseUniversalModMenu = false;
+            VotingSiteOverlayScalePercent = 120;
             PollSamplePercent = 2;
             AgeTurnoutCountryPreset = TurnoutCountryPreset.Baseline;
             TeenDailyVotingTurnoutPercent = ElectionUtility.DefaultTeenDailyVotingTurnoutPercent;
@@ -249,6 +254,9 @@ namespace Elections
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.UseUniversalModMenu)), "Use Universal Mod Menu" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.UseUniversalModMenu)), "Show the Elections button in Universal Mod Menu instead of the top-left game overlay." },
 
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.VotingSiteOverlayScalePercent)), "Voting Site Overlay Size" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.VotingSiteOverlayScalePercent)), "Size of the voting-site marker, ballot icon, and vote count. 100% = 1.0 scale, 120% is the default, and changes apply immediately." },
+
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.PollSamplePercent)), "Poll Sample Percent" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.PollSamplePercent)), "Approximate share of total city population represented in the campaign poll. Default is 2% and the maximum is 10%." },
 
@@ -340,6 +348,9 @@ namespace Elections
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.UseUniversalModMenu)), "Usar Universal Mod Menu" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.UseUniversalModMenu)), "Mostra o botão de Eleições no Universal Mod Menu em vez da sobreposição superior esquerda do jogo." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.VotingSiteOverlayScalePercent)), "Tamanho da Sobreposicao dos Locais de Votacao" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.VotingSiteOverlayScalePercent)), "Tamanho do marcador do local de votacao, icone de urna e contagem de votos. 100% = escala 1.0, 120% e o padrao, e as alteracoes sao aplicadas imediatamente." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.PollSamplePercent)), "Percentual da Amostra da Pesquisa" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.PollSamplePercent)), "Parcela aproximada da população total da cidade representada na pesquisa de campanha. O padrão é 2% e o máximo é 10%." },

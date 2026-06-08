@@ -12,12 +12,12 @@ Elections adds a mayoral election cycle to the city. Residents can become candid
 
 ## Dependencies and Compatibility
 
-**Important:** Elections requires Realistic Trips. This is an RT Module: Realistic Trips owns the calendar, time behavior, voting trips, mayor policy hooks, and special election-day travel requests used by this mod. Custom Chirps is used for election announcements, candidate messages and mayor messages.
+**Important:** Elections requires Realistic Trips. Realistic Trips has a large impact on gameplay, so if you are not familiar with it, please take a look at Realistic Trips first before using this mod. Realistic Trips owns the calendar, time behavior, voting trips, mayor policy hooks, and special election-day travel requests used by this mod. Custom Chirps is used for election announcements, candidate messages and mayor messages.
 
 ## What This Mod Adds
 
 * **Mayoral Campaigns:** Eligible residents are selected as candidates, receive generated profiles and platforms, and campaign before election day.
-* **Campaign Polls:** Polls sample eligible residents and show candidate support, undecided voters, age breakdowns, education breakdowns, and margin of error.
+* **Campaign:** Use campaign actions such as donations, civic programs, mayor outreach, endorsements, and vote-tampering attempts.
 * **Voting Trips:** On election day, residents can travel to polling places through Realistic Trips. Results are announced after voting closes.
 * **Mayor Effects:** The elected mayor applies a city policy effect until the next term. Platforms can include positive benefits and tradeoffs.
 * **Civic Programs:** The city can fund limited campaign-season programs such as turnout education, an election-day holiday, or strict voting ID proposals.
@@ -28,8 +28,6 @@ Elections adds a mayoral election cycle to the city. Residents can become candid
 
 * **General:** Enable or disable elections and choose whether the Elections button appears in Universal Mod Menu.
 * **Voting:** Configure poll sample size, voting hours, and age-turnout values or country presets.
-* **Campaign:** Use campaign actions such as donations, civic programs, mayor outreach, endorsements, and vote-tampering attempts.
-* **Debug:** Optional debug actions can force a campaign, election day, or poll generation for testing.
 	</LongDescription>
 	<!--Thumbnail-->
 	<Thumbnail Value="Properties/Thumbnail.png" />
@@ -44,7 +42,7 @@ Elections adds a mayoral election cycle to the city. Residents can become candid
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/elections-mod.1927087/" />
 	<!--Version of the mod-->
-	<ModVersion Value="0.1" />
+	<ModVersion Value="0.2" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.5.*" />
 	<!--Dependency for the mod, can be set multiple times-->
@@ -54,9 +52,17 @@ Elections adds a mayoral election cycle to the city. Residents can become candid
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
-* Initial release.
-* Adds mayoral campaigns, polls, election-day voting trips, candidate portraits, civic programs, mayor effects, and campaign events.
-* Requires Realistic Trips and Custom Chirps.
+* Added 10 additional candidate portraits.
+* Increased the mayor portrait size in the mayor panel to match candidate portraits.
+* Rebalanced civic turnout programs: teen programs now add +30% election turnout, adult programs remain +10%, and elderly programs now add +15%.
+* Renamed civic program copy from daily turnout to election turnout where players see accumulated support.
+* Updated voting-trip probability so the daily election chance is spread over each cim's available voting hours.
+* Reduced last-hour voting trip probability and increased the probability for the previous hour so fewer cims arrive too late while some late arrivals can still happen.
+* Changed final turnout reporting to use eligible voters instead of total population.
+* Improved election result chirps so each candidate link is used only once, leaving the celebration venue link available.
+* Added voting-site overlay size settings in the mod's menu.
+* Fixed bug that was preventing the mod's UI menu to be shown when the Universal Mod Menu was selected.
+* Relocated the mod's main UI location to the left corner of the screen when the mod button is in the top left.
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
 	<ExternalLink Type="github" Url="https://github.com/ruzbeh0/Elections" />

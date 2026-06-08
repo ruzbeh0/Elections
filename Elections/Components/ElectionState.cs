@@ -13,8 +13,8 @@ namespace Elections.Components
 
     public struct ElectionState : IComponentData, IQueryTypeParameter, ISerializable
     {
-        public const int CurrentVersion = 1;
-        private const int CurrentSerializedLayoutVersion = 16;
+        public const int CurrentVersion = 17;
+        private const int CurrentSerializedLayoutVersion = 17;
 
         public int version;
         public bool initialized;
@@ -178,6 +178,7 @@ namespace Elections.Components
         public int elderlyTurnoutBonusPercent;
         public int uneducatedTurnoutBonusPercent;
         public int educatedTurnoutBonusPercent;
+        public int supportProgramBalanceVersion;
         public bool strictVotingIdLawPassed;
         public bool strictVotingIdProposalPending;
         public bool strictVotingIdProposalPassed;
@@ -347,6 +348,7 @@ namespace Elections.Components
             writer.Write(strictVotingIdProposalPassed);
             writer.Write(strictVotingIdChirpUtcTicks);
             writer.Write(strictVotingIdChirpSent);
+            writer.Write(supportProgramBalanceVersion);
         }
 
         public void Deserialize<TReader>(TReader reader) where TReader : IReader
@@ -731,10 +733,22 @@ namespace Elections.Components
                 strictVotingIdChirpUtcTicks = 0;
                 strictVotingIdChirpSent = false;
             }
+
+            if (layoutVersion >= 17)
+            {
+                reader.Read(out supportProgramBalanceVersion);
+            }
+            else
+            {
+                supportProgramBalanceVersion = 0;
+            }
         }
 
         private static int GetSerializedLayoutVersion(int serializedVersion)
         {
+            if (serializedVersion == 1)
+                return 16;
+
             if (serializedVersion == CurrentVersion)
                 return CurrentSerializedLayoutVersion;
 

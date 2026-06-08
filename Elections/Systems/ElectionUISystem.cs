@@ -597,12 +597,7 @@ namespace Elections.Systems
 
         private static int GetSupportProgramBonusPercent(ElectionSupportProgramType type)
         {
-            return type == ElectionSupportProgramType.TeenVoterEducation ||
-                   type == ElectionSupportProgramType.AdultVoterEducation ||
-                   type == ElectionSupportProgramType.ElderlyVoterEducation ||
-                   type == ElectionSupportProgramType.VoterEducation
-                ? ElectionUtility.TurnoutProgramDailyBonusPercent
-                : 0;
+            return ElectionSupportPrograms.GetBonusPercent(type);
         }
 
         private static string GetSupportProgramDisabledReason(ElectionState state, ElectionSupportProgramType type, bool supportProgramsOpen, bool supportProgramUsedToday, bool electionDay)

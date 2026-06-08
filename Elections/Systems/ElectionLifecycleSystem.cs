@@ -48,6 +48,7 @@ namespace Elections.Systems
         private const float kVoteTamperingFireIntensity = 0.85f;
         private const int kStrictVotingIdPassChancePercent = 60;
         private const ushort kElectionCorruptionJailTime = 180;
+        private const int kSupportProgramBalanceVersion = 2;
 
         private EntityQuery m_StateQuery;
         private EntityQuery m_CandidateQuery;
@@ -1374,11 +1375,45 @@ namespace Elections.Systems
             if (state.supportProgramIdToday < -1 || state.supportProgramIdToday >= ElectionSupportPrograms.Count)
                 state.supportProgramIdToday = -1;
 
+            if (state.supportProgramBalanceVersion < kSupportProgramBalanceVersion)
+                MigrateSupportProgramBalance(ref state);
+            else if (state.supportProgramBalanceVersion > kSupportProgramBalanceVersion)
+                state.supportProgramBalanceVersion = kSupportProgramBalanceVersion;
+
             state.teenTurnoutBonusPercent = math.clamp(state.teenTurnoutBonusPercent, 0, 100);
             state.adultTurnoutBonusPercent = math.clamp(state.adultTurnoutBonusPercent, 0, 100);
             state.elderlyTurnoutBonusPercent = math.clamp(state.elderlyTurnoutBonusPercent, 0, 100);
             state.uneducatedTurnoutBonusPercent = math.clamp(state.uneducatedTurnoutBonusPercent, 0, 100);
             state.educatedTurnoutBonusPercent = math.clamp(state.educatedTurnoutBonusPercent, 0, 100);
+        }
+
+        private static void MigrateSupportProgramBalance(ref ElectionState state)
+        {
+            if (IsDonationOpenStage(state.stage))
+            {
+                state.teenTurnoutBonusPercent = MigrateLegacyTurnoutBonusPercent(
+                    state.teenTurnoutBonusPercent,
+                    ElectionSupportPrograms.TeenTurnoutProgramDailyBonusPercent);
+                state.elderlyTurnoutBonusPercent = MigrateLegacyTurnoutBonusPercent(
+                    state.elderlyTurnoutBonusPercent,
+                    ElectionSupportPrograms.ElderlyTurnoutProgramDailyBonusPercent);
+            }
+
+            state.supportProgramBalanceVersion = kSupportProgramBalanceVersion;
+        }
+
+        private static int MigrateLegacyTurnoutBonusPercent(int currentPercent, int newProgramBonusPercent)
+        {
+            currentPercent = math.clamp(currentPercent, 0, 100);
+            if (currentPercent <= 0 ||
+                newProgramBonusPercent == ElectionSupportPrograms.LegacyTurnoutProgramDailyBonusPercent)
+            {
+                return currentPercent;
+            }
+
+            int fundedProgramCount = (currentPercent + ElectionSupportPrograms.LegacyTurnoutProgramDailyBonusPercent - 1) /
+                ElectionSupportPrograms.LegacyTurnoutProgramDailyBonusPercent;
+            return math.clamp(fundedProgramCount * newProgramBonusPercent, 0, 100);
         }
 
         private static void ApplySupportProgram(ref ElectionState state, ElectionSupportProgramType type)
@@ -1390,29 +1425,29 @@ namespace Elections.Systems
                     break;
                 case ElectionSupportProgramType.TeenVoterEducation:
                     state.teenTurnoutBonusPercent = math.clamp(
-                        state.teenTurnoutBonusPercent + ElectionUtility.TurnoutProgramDailyBonusPercent,
+                        state.teenTurnoutBonusPercent + ElectionSupportPrograms.GetBonusPercent(type),
                         0,
                         100);
                     break;
                 case ElectionSupportProgramType.AdultVoterEducation:
                     state.adultTurnoutBonusPercent = math.clamp(
-                        state.adultTurnoutBonusPercent + ElectionUtility.TurnoutProgramDailyBonusPercent,
+                        state.adultTurnoutBonusPercent + ElectionSupportPrograms.GetBonusPercent(type),
                         0,
                         100);
                     break;
                 case ElectionSupportProgramType.ElderlyVoterEducation:
                     state.elderlyTurnoutBonusPercent = math.clamp(
-                        state.elderlyTurnoutBonusPercent + ElectionUtility.TurnoutProgramDailyBonusPercent,
+                        state.elderlyTurnoutBonusPercent + ElectionSupportPrograms.GetBonusPercent(type),
                         0,
                         100);
                     break;
                 case ElectionSupportProgramType.VoterEducation:
                     state.uneducatedTurnoutBonusPercent = math.clamp(
-                        state.uneducatedTurnoutBonusPercent + ElectionUtility.TurnoutProgramDailyBonusPercent,
+                        state.uneducatedTurnoutBonusPercent + ElectionSupportPrograms.GetBonusPercent(type),
                         0,
                         100);
                     state.educatedTurnoutBonusPercent = math.clamp(
-                        state.educatedTurnoutBonusPercent + ElectionUtility.TurnoutProgramDailyBonusPercent,
+                        state.educatedTurnoutBonusPercent + ElectionSupportPrograms.GetBonusPercent(type),
                         0,
                         100);
                     break;
@@ -1426,13 +1461,13 @@ namespace Elections.Systems
                 case ElectionSupportProgramType.ElectionDayHoliday:
                     return "Election day will be treated as a holiday for resident schedules.";
                 case ElectionSupportProgramType.TeenVoterEducation:
-                    return $"Teen daily turnout bonus is now +{state.teenTurnoutBonusPercent}%.";
+                    return $"Teen election turnout bonus is now +{state.teenTurnoutBonusPercent}%.";
                 case ElectionSupportProgramType.AdultVoterEducation:
-                    return $"Adult daily turnout bonus is now +{state.adultTurnoutBonusPercent}%.";
+                    return $"Adult election turnout bonus is now +{state.adultTurnoutBonusPercent}%.";
                 case ElectionSupportProgramType.ElderlyVoterEducation:
-                    return $"Elderly daily turnout bonus is now +{state.elderlyTurnoutBonusPercent}%.";
+                    return $"Elderly election turnout bonus is now +{state.elderlyTurnoutBonusPercent}%.";
                 case ElectionSupportProgramType.VoterEducation:
-                    return $"Uneducated and poorly educated daily turnout bonuses are now +{math.max(state.uneducatedTurnoutBonusPercent, state.educatedTurnoutBonusPercent)}%.";
+                    return $"Uneducated and poorly educated election turnout bonuses are now +{math.max(state.uneducatedTurnoutBonusPercent, state.educatedTurnoutBonusPercent)}%.";
                 default:
                     return "The civic program is active.";
             }
@@ -1577,6 +1612,7 @@ namespace Elections.Systems
             state.elderlyTurnoutBonusPercent = 0;
             state.uneducatedTurnoutBonusPercent = 0;
             state.educatedTurnoutBonusPercent = 0;
+            state.supportProgramBalanceVersion = kSupportProgramBalanceVersion;
         }
 
         private static void ResetStrictVotingIdState(ref ElectionState state)
@@ -3442,7 +3478,9 @@ namespace Elections.Systems
             bool winnerNegativeSoftened = winnerIndex == 0 ? state.candidateANegativeSoftened : state.candidateBNegativeSoftened;
             string winnerName = GetEntityName(winner, winnerIndex == 0 ? "Candidate A" : "Candidate B");
             int population = GetPopulation();
-            int turnoutPct = population > 0 ? (int)math.round((state.votesA + state.votesB) * 100f / population) : 0;
+            int eligibleVoters = GetEligibleVoterCount();
+            int totalVotes = math.max(0, state.votesA + state.votesB);
+            int turnoutPct = eligibleVoters > 0 ? (int)math.round(totalVotes * 100f / eligibleVoters) : 0;
             Entity previousMayor = state.mayor;
             CaptureOutgoingMayorForPostElection(ref state, winner);
 
@@ -3462,17 +3500,36 @@ namespace Elections.Systems
             state.victoryWinnerChirpUtcTicks = DateTime.UtcNow.AddMinutes(1).Ticks;
             state.victoryLoserChirpUtcTicks = DateTime.UtcNow.AddMinutes(2).Ticks;
             ResetBribeMeetingState(ref state, true);
-            DebugLog($"Election completed: date={ElectionUtility.FormatCurrentDate(World, now)}, winnerIndex={winnerIndex}, winner={DescribeEntity(winner, winnerName)}, previousMayor={FormatEntity(previousMayor)}, outgoingMayor={FormatEntity(state.outgoingMayor)}, outgoingMayorBribeTotal={state.outgoingMayorBribeTotal:n0}, votesA={state.votesA}, votesB={state.votesB}, voteRequests={state.voteRequests}, voteArrivals={state.voteArrivals}, population={population}, turnoutPct={turnoutPct}, effectId={effectId}.");
+            DebugLog($"Election completed: date={ElectionUtility.FormatCurrentDate(World, now)}, winnerIndex={winnerIndex}, winner={DescribeEntity(winner, winnerName)}, previousMayor={FormatEntity(previousMayor)}, outgoingMayor={FormatEntity(state.outgoingMayor)}, outgoingMayorBribeTotal={state.outgoingMayorBribeTotal:n0}, votesA={state.votesA}, votesB={state.votesB}, voteRequests={state.voteRequests}, voteArrivals={state.voteArrivals}, population={population}, eligibleVoters={eligibleVoters}, turnoutPct={turnoutPct}, effectId={effectId}.");
 
             ElectionEffectDefinition effect = ElectionEffects.Get(effectId, winnerNegativeSoftened);
-            string partyText = state.victoryPartyVenue != Entity.Null
-                ? $" Supporters are gathering at {GetBuildingName(state.victoryPartyVenue, "the celebration site")}."
+            Entity announcementVenue = IsValidVenue(state.victoryPartyVenue) ? state.victoryPartyVenue : Entity.Null;
+            string candidateAName = GetEntityName(state.candidateA, "Candidate A");
+            string candidateBName = GetEntityName(state.candidateB, "Candidate B");
+            string namedPartyText = announcementVenue != Entity.Null
+                ? $" Supporters are gathering at {GetBuildingName(announcementVenue, "the celebration site")}."
                 : string.Empty;
-            string winnerReference = winnerIndex == 0 ? "{LINK_1}" : "{LINK_2}";
-            PostElectionChirpWithCandidates(
-                $"Election results for {ElectionUtility.FormatCurrentDate(World, now)} are final. {winnerReference} has been elected mayor. Turnout was {turnoutPct}% of the population ({state.votesA + state.votesB:n0} votes). Results: {{LINK_1}} {state.votesA:n0}, {{LINK_2}} {state.votesB:n0}. The new mayor's platform {effect.Description}.{partyText}",
+            string linkedPartyText = announcementVenue != Entity.Null
+                ? " Supporters are gathering at {LINK_3}."
+                : string.Empty;
+            string venueOnlyLinkedPartyText = announcementVenue != Entity.Null
+                ? " Supporters are gathering at {LINK_1}."
+                : string.Empty;
+            string turnoutDenominatorText = eligibleVoters > 0
+                ? $"eligible voters ({totalVotes:n0} of {eligibleVoters:n0})"
+                : $"eligible voters ({totalVotes:n0} votes)";
+            string resultsIntro = $"Election results for {ElectionUtility.FormatCurrentDate(World, now)} are final. {winnerName} has been elected mayor. Turnout was {turnoutPct}% of {turnoutDenominatorText}.";
+            string linkedCandidateResults = $" Results: {{LINK_1}} {state.votesA:n0}, {{LINK_2}} {state.votesB:n0}.";
+            string namedCandidateResults = $" Results: {candidateAName} {state.votesA:n0}, {candidateBName} {state.votesB:n0}.";
+            string platformText = $" The new mayor's platform {effect.Description}.";
+            PostElectionResultsChirp(
+                $"{resultsIntro}{linkedCandidateResults}{platformText}{linkedPartyText}",
+                $"{resultsIntro}{linkedCandidateResults}{platformText}{namedPartyText}",
+                $"{resultsIntro}{namedCandidateResults}{platformText}{venueOnlyLinkedPartyText}",
+                $"{resultsIntro}{namedCandidateResults}{platformText}{namedPartyText}",
                 state.candidateA,
-                state.candidateB);
+                state.candidateB,
+                announcementVenue);
             DebugLog($"Scheduled victory result chirps: winnerDue={new DateTime(state.victoryWinnerChirpUtcTicks):O} UTC, loserDue={new DateTime(state.victoryLoserChirpUtcTicks):O} UTC, venue={FormatEntity(state.victoryPartyVenue)}.");
 
             ClearVoteTrips();
@@ -4307,6 +4364,22 @@ namespace Elections.Systems
             return 0;
         }
 
+        private int GetEligibleVoterCount()
+        {
+            int eligibleCount = 0;
+            using (NativeArray<Entity> entities = m_CandidateQuery.ToEntityArray(Allocator.Temp))
+            using (NativeArray<Citizen> citizens = m_CandidateQuery.ToComponentDataArray<Citizen>(Allocator.Temp))
+            {
+                for (int i = 0; i < entities.Length; i++)
+                {
+                    if (ElectionUtility.IsEligibleVoterResident(EntityManager, entities[i], citizens[i]))
+                        eligibleCount++;
+                }
+            }
+
+            return eligibleCount;
+        }
+
         private bool HasMinimumPopulation(string operation)
         {
             int population = GetPopulation();
@@ -4561,12 +4634,40 @@ namespace Elections.Systems
             CustomChirpsBridge.PostChirpWith2Targets(text, DepartmentAccountBridge.CensusBureau, candidateA, candidateB, "Election Board");
         }
 
-        private void PostElectionResultsChirp(string text, Entity winner, Entity venue)
+        private void PostElectionResultsChirp(
+            string textWithCandidateAndVenueLinks,
+            string textWithCandidateLinks,
+            string textWithVenueLink,
+            string fallbackText,
+            Entity candidateA,
+            Entity candidateB,
+            Entity venue)
         {
-            if (venue != Entity.Null && IsValidVenue(venue))
-                CustomChirpsBridge.PostChirpWith2Targets(text, DepartmentAccountBridge.CensusBureau, winner, venue, "Election Board");
-            else
-                PostElectionChirp(text, winner);
+            bool hasCandidateLinks = IsValidChirpCitizen(candidateA) && IsValidChirpCitizen(candidateB);
+            bool hasVenueLink = venue != Entity.Null && IsValidVenue(venue);
+
+            if (hasCandidateLinks &&
+                hasVenueLink &&
+                CustomChirpsBridge.SupportsChirpWith3Targets() &&
+                CustomChirpsBridge.PostChirpWith3Targets(textWithCandidateAndVenueLinks, DepartmentAccountBridge.CensusBureau, candidateA, candidateB, venue, "Election Board"))
+            {
+                return;
+            }
+
+            if (hasCandidateLinks &&
+                CustomChirpsBridge.SupportsChirpWith2Targets() &&
+                CustomChirpsBridge.PostChirpWith2Targets(textWithCandidateLinks, DepartmentAccountBridge.CensusBureau, candidateA, candidateB, "Election Board"))
+            {
+                return;
+            }
+
+            if (hasVenueLink)
+            {
+                PostElectionChirp(textWithVenueLink, venue);
+                return;
+            }
+
+            PostElectionChirp(fallbackText, Entity.Null);
         }
 
         private void ClearVoteTrips()

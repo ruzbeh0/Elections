@@ -3,6 +3,22 @@
   pointer-events: auto;
 }
 
+.detachedRoot {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 9000;
+  pointer-events: none;
+}
+
+.detachedRoot .menuCluster {
+  left: 12rem;
+  top: 64rem;
+  z-index: 9000;
+}
+
 .icon {
   width: 92%;
   height: 92%;
@@ -998,13 +1014,13 @@
   display: flex;
   align-items: center;
   gap: 8rem;
-  min-height: 44rem;
+  min-height: 52rem;
 }
 
 .mayorPortrait {
-  width: 40rem;
-  height: 40rem;
-  flex: 0 0 40rem;
+  width: 48rem;
+  height: 48rem;
+  flex: 0 0 48rem;
   border-radius: 4rem;
   object-fit: cover;
   background-color: var(--dividerColor);
@@ -1045,7 +1061,7 @@
 
 .mayorPlatform {
   min-height: 42rem;
-  padding-left: 48rem;
+  padding-left: 56rem;
 }
 
 .mayorPlatform > span {

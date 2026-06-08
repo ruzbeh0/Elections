@@ -37,11 +37,19 @@ namespace Elections.Bridge
         private static ClearElectionDaySpecialEventsSuppressedDelegate s_ClearElectionDaySpecialEventsSuppressed;
         private static Type s_ModType;
         private static Type s_TimeSystemType;
+        private static Type s_CitizenScheduleType;
         private static FieldInfo s_SettingField;
         private static FieldInfo s_TicksPerDayField;
+        private static FieldInfo s_CitizenScheduleDayOffField;
+        private static FieldInfo s_CitizenScheduleGoToWorkField;
+        private static FieldInfo s_CitizenScheduleEndWorkField;
+        private static ComponentType s_CitizenScheduleComponentType;
+        private static MethodInfo s_GetCitizenScheduleData;
         private static PropertyInfo s_DaysPerMonthProperty;
         private static PropertyInfo s_SlowTimeFactorProperty;
+        [ThreadStatic] private static object[] s_CitizenScheduleInvokeArgs;
         private static bool s_LoggedMissingTime;
+        private static bool s_LoggedScheduleFailure;
 
         public static bool IsAvailable
         {
@@ -82,6 +90,63 @@ namespace Elections.Bridge
             catch (Exception ex)
             {
                 Mod.log.Warn($"RealisticTrips IsCitizenOutsideWorkHours failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        public static bool TryGetCitizenWorkWindow(
+            EntityManager entityManager,
+            Entity citizen,
+            out bool dayOff,
+            out float goToWork,
+            out float endWork)
+        {
+            dayOff = false;
+            goToWork = -1f;
+            endWork = -1f;
+
+            EnsureResolve();
+            if (s_CitizenScheduleType == null ||
+                s_GetCitizenScheduleData == null ||
+                s_CitizenScheduleDayOffField == null ||
+                s_CitizenScheduleGoToWorkField == null ||
+                s_CitizenScheduleEndWorkField == null ||
+                citizen == Entity.Null ||
+                !entityManager.Exists(citizen))
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!entityManager.HasComponent(citizen, s_CitizenScheduleComponentType))
+                    return false;
+
+                object[] invokeArgs = s_CitizenScheduleInvokeArgs ?? (s_CitizenScheduleInvokeArgs = new object[1]);
+                object schedule;
+                try
+                {
+                    invokeArgs[0] = citizen;
+                    schedule = s_GetCitizenScheduleData.Invoke(entityManager, invokeArgs);
+                }
+                finally
+                {
+                    invokeArgs[0] = null;
+                }
+
+                dayOff = (bool)s_CitizenScheduleDayOffField.GetValue(schedule);
+                goToWork = (float)s_CitizenScheduleGoToWorkField.GetValue(schedule);
+                endWork = (float)s_CitizenScheduleEndWorkField.GetValue(schedule);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                if (!s_LoggedScheduleFailure)
+                {
+                    s_LoggedScheduleFailure = true;
+                    Mod.log.Warn($"RealisticTrips CitizenSchedule lookup failed: {ex.Message}");
+                }
+
                 return false;
             }
         }
@@ -372,6 +437,8 @@ namespace Elections.Bridge
                         FindType("Time2Work.Mod");
             s_TimeSystemType = Type.GetType("Time2Work.Time2WorkTimeSystem, Time2Work") ??
                                FindType("Time2Work.Time2WorkTimeSystem");
+            s_CitizenScheduleType = Type.GetType("Time2Work.Components.CitizenSchedule, Time2Work") ??
+                                    FindType("Time2Work.Components.CitizenSchedule");
 
             if (s_BridgeType == null)
             {
@@ -399,12 +466,13 @@ namespace Elections.Bridge
             }
 
             s_TicksPerDayField = s_TimeSystemType?.GetField("kTicksPerDay", BindingFlags.Public | BindingFlags.Static);
+            ResolveCitizenScheduleAccessors();
 
             if (s_RequestSocialTrip == null)
                 s_Resolved = false;
         }
 
-        private static int GetTicksPerDay()
+        public static int GetTicksPerDay()
         {
             EnsureResolve();
 
@@ -419,6 +487,53 @@ namespace Elections.Bridge
             }
 
             return Math.Max(1, (int)Math.Floor(GetSlowTimeFactor() * TimeSystem.kTicksPerDay));
+        }
+
+        private static void ResolveCitizenScheduleAccessors()
+        {
+            s_CitizenScheduleComponentType = default;
+            s_CitizenScheduleDayOffField = null;
+            s_CitizenScheduleGoToWorkField = null;
+            s_CitizenScheduleEndWorkField = null;
+            s_GetCitizenScheduleData = null;
+
+            if (s_CitizenScheduleType == null)
+                return;
+
+            try
+            {
+                s_CitizenScheduleComponentType = ComponentType.ReadOnly(s_CitizenScheduleType);
+                s_CitizenScheduleDayOffField = s_CitizenScheduleType.GetField("dayoff", BindingFlags.Public | BindingFlags.Instance);
+                s_CitizenScheduleGoToWorkField = s_CitizenScheduleType.GetField("go_to_work", BindingFlags.Public | BindingFlags.Instance);
+                s_CitizenScheduleEndWorkField = s_CitizenScheduleType.GetField("end_work", BindingFlags.Public | BindingFlags.Instance);
+
+                foreach (MethodInfo method in typeof(EntityManager).GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (method.Name != nameof(EntityManager.GetComponentData) || !method.IsGenericMethodDefinition)
+                        continue;
+
+                    ParameterInfo[] parameters = method.GetParameters();
+                    if (parameters.Length == 1 && parameters[0].ParameterType == typeof(Entity))
+                    {
+                        s_GetCitizenScheduleData = method.MakeGenericMethod(s_CitizenScheduleType);
+                        break;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                s_CitizenScheduleComponentType = default;
+                s_CitizenScheduleDayOffField = null;
+                s_CitizenScheduleGoToWorkField = null;
+                s_CitizenScheduleEndWorkField = null;
+                s_GetCitizenScheduleData = null;
+
+                if (!s_LoggedScheduleFailure)
+                {
+                    s_LoggedScheduleFailure = true;
+                    Mod.log.Warn($"RealisticTrips CitizenSchedule accessors failed: {ex.Message}");
+                }
+            }
         }
 
         private static void EnsurePolicyResolve()

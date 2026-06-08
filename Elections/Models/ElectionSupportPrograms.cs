@@ -31,6 +31,11 @@ namespace Elections.Models
     internal static class ElectionSupportPrograms
     {
         public const int Count = 5;
+        public const int LegacyTurnoutProgramDailyBonusPercent = 10;
+        public const int TeenTurnoutProgramDailyBonusPercent = 30;
+        public const int AdultTurnoutProgramDailyBonusPercent = 10;
+        public const int ElderlyTurnoutProgramDailyBonusPercent = 15;
+        public const int EducationTurnoutProgramDailyBonusPercent = 10;
 
         public static bool TryGet(int index, out ElectionSupportProgramDefinition definition)
         {
@@ -47,29 +52,29 @@ namespace Elections.Models
                     definition = new ElectionSupportProgramDefinition(
                         ElectionSupportProgramType.TeenVoterEducation,
                         "Teen voter education",
-                        "Adds +10% teen daily turnout.",
-                        "Fund a civic education campaign for teen voters. Each campaign adds +10% to teen daily turnout.");
+                        $"Adds +{TeenTurnoutProgramDailyBonusPercent}% teen election turnout.",
+                        $"Fund a civic education campaign for teen voters. Each campaign adds +{TeenTurnoutProgramDailyBonusPercent}% to teen election turnout.");
                     return true;
                 case ElectionSupportProgramType.AdultVoterEducation:
                     definition = new ElectionSupportProgramDefinition(
                         ElectionSupportProgramType.AdultVoterEducation,
                         "Adult voter education",
-                        "Adds +10% adult daily turnout.",
-                        "Fund a civic education campaign for adult voters. Each campaign adds +10% to adult daily turnout.");
+                        $"Adds +{AdultTurnoutProgramDailyBonusPercent}% adult election turnout.",
+                        $"Fund a civic education campaign for adult voters. Each campaign adds +{AdultTurnoutProgramDailyBonusPercent}% to adult election turnout.");
                     return true;
                 case ElectionSupportProgramType.ElderlyVoterEducation:
                     definition = new ElectionSupportProgramDefinition(
                         ElectionSupportProgramType.ElderlyVoterEducation,
                         "Elderly voter education",
-                        "Adds +10% elderly daily turnout.",
-                        "Fund a civic education campaign for elderly voters. Each campaign adds +10% to elderly daily turnout.");
+                        $"Adds +{ElderlyTurnoutProgramDailyBonusPercent}% elderly election turnout.",
+                        $"Fund a civic education campaign for elderly voters. Each campaign adds +{ElderlyTurnoutProgramDailyBonusPercent}% to elderly election turnout.");
                     return true;
                 case ElectionSupportProgramType.VoterEducation:
                     definition = new ElectionSupportProgramDefinition(
                         ElectionSupportProgramType.VoterEducation,
                         "Voter education program",
-                        "Adds +10% uneducated and poorly educated daily turnout.",
-                        "Fund a voter education program for uneducated and poorly educated residents. Each program adds +10% to daily turnout for those education groups.");
+                        $"Adds +{EducationTurnoutProgramDailyBonusPercent}% uneducated and poorly educated election turnout.",
+                        $"Fund a voter education program for uneducated and poorly educated residents. Each program adds +{EducationTurnoutProgramDailyBonusPercent}% to election turnout for those education groups.");
                     return true;
                 default:
                     definition = default;
@@ -80,6 +85,23 @@ namespace Elections.Models
         public static int GetCost(int campaignDonationAmount)
         {
             return Math.Max(1, ElectionDonationTiers.NormalizeDonationAmount(campaignDonationAmount) / 2);
+        }
+
+        public static int GetBonusPercent(ElectionSupportProgramType type)
+        {
+            switch (type)
+            {
+                case ElectionSupportProgramType.TeenVoterEducation:
+                    return TeenTurnoutProgramDailyBonusPercent;
+                case ElectionSupportProgramType.AdultVoterEducation:
+                    return AdultTurnoutProgramDailyBonusPercent;
+                case ElectionSupportProgramType.ElderlyVoterEducation:
+                    return ElderlyTurnoutProgramDailyBonusPercent;
+                case ElectionSupportProgramType.VoterEducation:
+                    return EducationTurnoutProgramDailyBonusPercent;
+                default:
+                    return 0;
+            }
         }
     }
 }

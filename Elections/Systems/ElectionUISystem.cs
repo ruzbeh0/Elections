@@ -80,6 +80,7 @@ namespace Elections.Systems
             AddBinding(new TriggerBinding<int>(Mod.Id, "runSupportProgram", RunSupportProgram));
             AddBinding(new TriggerBinding<int>(Mod.Id, "bribeMayor", BribeMayor));
             AddBinding(new TriggerBinding<int>(Mod.Id, "endorseCandidate", EndorseCandidate));
+            AddBinding(new TriggerBinding(Mod.Id, "cashAssistance", CashAssistance));
             AddBinding(new TriggerBinding<int>(Mod.Id, "tamperVotes", TamperVotes));
             AddBinding(new TriggerBinding(Mod.Id, "proposeVotingIdLaw", ProposeVotingIdLaw));
             AddBinding(new TriggerBinding<bool>(Mod.Id, "setShowVotingLocations", SetShowVotingLocations));
@@ -128,6 +129,12 @@ namespace Elections.Systems
         private void EndorseCandidate(int candidateIndex)
         {
             m_LifecycleSystem?.EndorseCandidate(candidateIndex);
+            m_PanelBinding?.Update();
+        }
+
+        private void CashAssistance()
+        {
+            m_LifecycleSystem?.CashAssistance();
             m_PanelBinding?.Update();
         }
 
@@ -289,6 +296,7 @@ namespace Elections.Systems
                 writer.PropertyName("bribeBlocked"); writer.Write(false);
                 writer.PropertyName("bribeMeetingPending"); writer.Write(false);
                 writer.PropertyName("bribeCost"); writer.Write(ElectionLifecycleSystem.BribeAmount);
+                writer.PropertyName("cashAssistanceTurnoutBonusPercent"); writer.Write(0);
                 WriteSupportProgramPanel(writer, default(ElectionState), false, false, false);
                 writer.PropertyName("pollDate"); writer.Write(string.Empty);
                 writer.PropertyName("electionDate"); writer.Write(string.Empty);
@@ -352,6 +360,7 @@ namespace Elections.Systems
             writer.PropertyName("bribeBlocked"); writer.Write(bribeBlocked);
             writer.PropertyName("bribeMeetingPending"); writer.Write(bribeMeetingPending);
             writer.PropertyName("bribeCost"); writer.Write(GetCampaignBribeAmount(state));
+            writer.PropertyName("cashAssistanceTurnoutBonusPercent"); writer.Write(state.cashAssistanceTurnoutBonusPercent);
             WriteSupportProgramPanel(writer, state, supportProgramsOpen, supportProgramUsedToday, electionDay);
             writer.PropertyName("pollDate"); writer.Write(FormatScheduledDate(state.pollYear, state.pollMonth));
             writer.PropertyName("electionDate"); writer.Write(FormatElectionDate(state));
@@ -397,7 +406,7 @@ namespace Elections.Systems
             int portraitIndex = candidateA ? state.candidateAPortraitIndex : state.candidateBPortraitIndex;
             int tagId = candidateA ? state.candidateATagId : state.candidateBTagId;
             int donationAmount = candidateA ? state.donationA : state.donationB;
-            ElectionEffectDefinition effect = ElectionEffects.Get(effectId, candidateA ? state.candidateANegativeSoftened : state.candidateBNegativeSoftened);
+            ElectionEffectDefinition effect = ElectionEffects.Get(effectId, candidateA ? state.candidateANegativeSoftened : state.candidateBNegativeSoftened, tagId);
             int donationBonusPercent = (int)math.round(ElectionDonationTiers.GetBonusForAmount(donationAmount, state.campaignDonationAmount) * 100f);
             ElectionDonationTiers.TryGet(0, state.campaignDonationAmount, out ElectionDonationTier donationTier);
             int donationCost = ElectionCandidateTags.GetDonationCost(tagId, donationTier.Amount);
@@ -448,8 +457,8 @@ namespace Elections.Systems
 
         private void WriteMayor(IJsonWriter writer, ElectionState state)
         {
-            ElectionEffectDefinition effect = ElectionEffects.Get(state.mayorEffectId, state.mayorNegativeSoftened);
             ElectionCandidateTagDefinition tag = ElectionCandidateTags.Get(state.mayorTagId);
+            ElectionEffectDefinition effect = ElectionEffects.Get(state.mayorEffectId, state.mayorNegativeSoftened, state.mayorTagId);
             bool canFocus = state.mayor != Entity.Null && EntityManager.Exists(state.mayor);
             string mayorName = GetEntityName(state.mayor, string.Empty);
 
@@ -748,6 +757,22 @@ namespace Elections.Systems
             WritePollBreakdown(writer, "education3", "Well educated", pollReleased ? state.pollEducation3VotesA : 0, pollReleased ? state.pollEducation3VotesB : 0, pollReleased ? state.pollEducation3Undecided : 0, nameA, nameB);
             WritePollBreakdown(writer, "education4", "Highly educated", pollReleased ? state.pollEducation4VotesA : 0, pollReleased ? state.pollEducation4VotesB : 0, pollReleased ? state.pollEducation4Undecided : 0, nameA, nameB);
             writer.ArrayEnd();
+            writer.PropertyName("incomeGroups");
+            if (pollReleased && HasIncomePollBreakdown(state))
+            {
+                writer.ArrayBegin(5);
+                WritePollBreakdown(writer, "income0", "Struggling", state.pollIncome0VotesA, state.pollIncome0VotesB, state.pollIncome0Undecided, nameA, nameB);
+                WritePollBreakdown(writer, "income1", "Modest income", state.pollIncome1VotesA, state.pollIncome1VotesB, state.pollIncome1Undecided, nameA, nameB);
+                WritePollBreakdown(writer, "income2", "Middle income", state.pollIncome2VotesA, state.pollIncome2VotesB, state.pollIncome2Undecided, nameA, nameB);
+                WritePollBreakdown(writer, "income3", "Comfortable", state.pollIncome3VotesA, state.pollIncome3VotesB, state.pollIncome3Undecided, nameA, nameB);
+                WritePollBreakdown(writer, "income4", "Wealthy", state.pollIncome4VotesA, state.pollIncome4VotesB, state.pollIncome4Undecided, nameA, nameB);
+                writer.ArrayEnd();
+            }
+            else
+            {
+                writer.ArrayBegin(0);
+                writer.ArrayEnd();
+            }
             writer.TypeEnd();
         }
 
@@ -769,6 +794,7 @@ namespace Elections.Systems
             writer.PropertyName("resultDescription"); writer.Write(string.Empty);
             writer.PropertyName("ageGroups"); writer.ArrayBegin(0); writer.ArrayEnd();
             writer.PropertyName("educationGroups"); writer.ArrayBegin(0); writer.ArrayEnd();
+            writer.PropertyName("incomeGroups"); writer.ArrayBegin(0); writer.ArrayEnd();
             writer.TypeEnd();
         }
 
@@ -879,6 +905,10 @@ namespace Elections.Systems
                 case ElectionSupportProgramType.VoterEducation:
                     return state.uneducatedTurnoutBonusPercent > 0 ||
                            state.educatedTurnoutBonusPercent > 0;
+                case ElectionSupportProgramType.LowIncomeVoterOutreach:
+                    return state.lowIncomeTurnoutBonusPercent > 0;
+                case ElectionSupportProgramType.TransitVouchers:
+                    return state.transitVoucherTurnoutBonusPercent > 0;
                 default:
                     return false;
             }
@@ -896,6 +926,10 @@ namespace Elections.Systems
                     return state.elderlyTurnoutBonusPercent;
                 case ElectionSupportProgramType.VoterEducation:
                     return math.max(state.uneducatedTurnoutBonusPercent, state.educatedTurnoutBonusPercent);
+                case ElectionSupportProgramType.LowIncomeVoterOutreach:
+                    return state.lowIncomeTurnoutBonusPercent;
+                case ElectionSupportProgramType.TransitVouchers:
+                    return state.transitVoucherTurnoutBonusPercent;
                 default:
                     return 0;
             }
@@ -935,6 +969,15 @@ namespace Elections.Systems
             return state.pollVotesA + state.pollVotesB + state.pollUndecided > 0 ||
                    state.stage == ElectionCampaignStage.PollReleased ||
                    state.stage == ElectionCampaignStage.Voting;
+        }
+
+        private static bool HasIncomePollBreakdown(ElectionState state)
+        {
+            return state.pollIncome0VotesA + state.pollIncome0VotesB + state.pollIncome0Undecided +
+                   state.pollIncome1VotesA + state.pollIncome1VotesB + state.pollIncome1Undecided +
+                   state.pollIncome2VotesA + state.pollIncome2VotesB + state.pollIncome2Undecided +
+                   state.pollIncome3VotesA + state.pollIncome3VotesB + state.pollIncome3Undecided +
+                   state.pollIncome4VotesA + state.pollIncome4VotesB + state.pollIncome4Undecided > 0;
         }
 
         private static bool IsDonationStage(ElectionCampaignStage stage)

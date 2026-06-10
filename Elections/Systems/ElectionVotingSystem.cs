@@ -236,7 +236,8 @@ namespace Elections.Systems
 
                     int dailyTurnout = math.clamp(
                         GetDailyVotingAttemptPercent(age, teenDailyTurnout, adultDailyTurnout, elderlyDailyTurnout) +
-                        GetEducationDailyTurnoutBonusPercent(state, data.GetEducationLevel()),
+                        GetEducationDailyTurnoutBonusPercent(state, data.GetEducationLevel()) +
+                        ElectionUtility.GetTargetedTurnoutBonusPercent(EntityManager, citizen, data, state),
                         1,
                         100);
                     dailyTurnout = ElectionCandidateTags.ApplyTurnoutModifier(dailyTurnout, state.candidateATagId, state.candidateBTagId);

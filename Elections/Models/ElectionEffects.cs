@@ -146,25 +146,37 @@ namespace Elections.Models
 
         public static ElectionEffectDefinition Get(int id)
         {
-            return Get(id, 1f);
+            return Get(id, 1f, 1f);
         }
 
         public static ElectionEffectDefinition Get(int id, bool negativeSoftened)
         {
-            return Get(id, negativeSoftened ? 0.5f : 1f);
+            return Get(id, 1f, negativeSoftened ? 0.5f : 1f);
+        }
+
+        public static ElectionEffectDefinition Get(int id, bool negativeSoftened, int candidateTagId)
+        {
+            float platformScale = ElectionCandidateTags.GetPlatformEffectScale(candidateTagId);
+            return Get(id, platformScale, (negativeSoftened ? 0.5f : 1f) * platformScale);
         }
 
         public static ElectionEffectDefinition Get(int id, float negativeScale)
+        {
+            return Get(id, 1f, negativeScale);
+        }
+
+        public static ElectionEffectDefinition Get(int id, float positiveScale, float negativeScale)
         {
             if (id == 0)
                 return CreateTransitionEffect();
 
             uint seed = Mix((uint)Math.Max(1, id));
-            float scale = Math.Max(0f, negativeScale);
+            float positiveAmountScale = Math.Max(0f, positiveScale);
+            float negativeAmountScale = Math.Max(0f, negativeScale);
             PlatformOption positiveOption = kPositiveOptions[Pick(ref seed, kPositiveOptions.Length)];
             PlatformOption negativeOption = kNegativeOptions[PickDifferentKey(ref seed, kNegativeOptions, positiveOption.Key)];
-            ElectionEffectImpact positive = BuildImpact(ref seed, positiveOption, true, 1f);
-            ElectionEffectImpact negative = BuildImpact(ref seed, negativeOption, false, scale);
+            ElectionEffectImpact positive = BuildImpact(ref seed, positiveOption, true, positiveAmountScale);
+            ElectionEffectImpact negative = BuildImpact(ref seed, negativeOption, false, negativeAmountScale);
 
             return BuildDefinition(id, positive, negative);
         }

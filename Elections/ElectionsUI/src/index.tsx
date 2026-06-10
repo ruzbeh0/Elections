@@ -75,6 +75,7 @@ type PollBreakdown = PollResult & {
 type Poll = PollResult & {
   ageGroups: PollBreakdown[];
   educationGroups: PollBreakdown[];
+  incomeGroups: PollBreakdown[];
 };
 
 type MayorBuildingTarget = {
@@ -139,6 +140,7 @@ type ElectionPanel = {
   bribeBlocked: boolean;
   bribeMeetingPending: boolean;
   bribeCost: number;
+  cashAssistanceTurnoutBonusPercent: number;
   supportProgramsOpen: boolean;
   supportProgramUsedToday: boolean;
   supportProgramUsedTodayLabel: string;
@@ -173,6 +175,18 @@ type ElectionPanel = {
 };
 
 type PanelSection = "votingSites" | "mayor" | "residence" | "schedule" | "programs" | "candidates";
+type CandidateTargetActionKind = "bribe" | "endorse" | "tamper";
+type MayorActionKind = CandidateTargetActionKind | "cashAssistance" | "votingId";
+type MayorCampaignAction = {
+  kind: MayorActionKind;
+  title: string;
+  description: string;
+  buttonLabel: string;
+  targetButtonLabel?: string;
+  status: string;
+  disabled: boolean;
+  requiresCandidate: boolean;
+};
 
 const emptyCandidate = (index: number, name: string): Candidate => ({
   index,
@@ -244,6 +258,7 @@ const defaultPanel: ElectionPanel = {
   bribeBlocked: false,
   bribeMeetingPending: false,
   bribeCost: 5000000,
+  cashAssistanceTurnoutBonusPercent: 0,
   supportProgramsOpen: false,
   supportProgramUsedToday: false,
   supportProgramUsedTodayLabel: "",
@@ -269,6 +284,7 @@ const defaultPanel: ElectionPanel = {
     resultDescription: "",
     ageGroups: [],
     educationGroups: [],
+    incomeGroups: [],
   },
   donationTiers: [],
   candidateA: emptyCandidate(0, "Candidate A"),
@@ -754,7 +770,7 @@ function Info(props: { label: string; value: string; tooltip: string }): ReactEl
 
 function ScheduleSection(props: { panel: ElectionPanel }): ReactElement {
   const { panel } = props;
-  const [pollTab, setPollTab] = useState<"overall" | "age" | "education">("overall");
+  const [pollTab, setPollTab] = useState<"overall" | "age" | "education" | "income">("overall");
   const votingWindow = panel.votingStartTime && panel.votingEndTime
     ? `${panel.votingStartTime}-${panel.votingEndTime}`
     : "Pending";
@@ -821,6 +837,7 @@ function ScheduleSection(props: { panel: ElectionPanel }): ReactElement {
                 { key: "overall" as const, label: "Overall" },
                 { key: "age" as const, label: "Age" },
                 { key: "education" as const, label: "Education" },
+                { key: "income" as const, label: "Income" },
               ].map((tab) => (
                 <Tooltip tooltip={`Show ${tab.label.toLowerCase()} poll results.`} key={tab.key}>
                   <button
@@ -852,6 +869,13 @@ function ScheduleSection(props: { panel: ElectionPanel }): ReactElement {
             {pollTab === "education" && (
               <PollBreakdownList
                 groups={panel.poll.educationGroups}
+                candidateAName={panel.candidateA.name}
+                candidateBName={panel.candidateB.name}
+              />
+            )}
+            {pollTab === "income" && (
+              <PollBreakdownList
+                groups={panel.poll.incomeGroups}
                 candidateAName={panel.candidateA.name}
                 candidateBName={panel.candidateB.name}
               />
@@ -1288,9 +1312,11 @@ function MayorChoiceDropdown(props: {
 
 function MayorSection(props: { panel: ElectionPanel }): ReactElement {
   const { panel } = props;
+  const [pickerActionKind, setPickerActionKind] = useState<CandidateTargetActionKind | null>(null);
   const activeCandidateField = hasActiveCandidateField(panel);
   const candidateAName = panel.candidateA?.name || "Candidate A";
   const candidateBName = panel.candidateB?.name || "Candidate B";
+  const candidateTargets = [panel.candidateA, panel.candidateB].filter((candidate): candidate is Candidate => Boolean(candidate?.exists));
   const endorsedName = panel.endorsedCandidateIndex === 0
     ? candidateAName
     : panel.endorsedCandidateIndex === 1
@@ -1309,81 +1335,62 @@ function MayorSection(props: { panel: ElectionPanel }): ReactElement {
     : panel.votingIdLawPassed
       ? "Passed"
       : "";
-  const mayorActions = [
+  const mayorActions: MayorCampaignAction[] = [
     {
       kind: "bribe" as const,
-      candidateIndex: 0,
-      title: activeCandidateField ? `Platform meeting: ${candidateAName}` : "Platform meeting",
-      description: "The mayor will attempt to convince the candidate to soften their platform.",
-      buttonLabel: "Bribe",
+      title: "Platform meeting",
+      description: "The mayor will attempt to convince a selected candidate to soften their platform.",
+      buttonLabel: "Choose",
+      targetButtonLabel: "Bribe",
       status: bribeStatus,
       disabled: !panel.canBribe,
-    },
-    {
-      kind: "bribe" as const,
-      candidateIndex: 1,
-      title: activeCandidateField ? `Platform meeting: ${candidateBName}` : "Platform meeting",
-      description: "The mayor will attempt to convince the candidate to soften their platform.",
-      buttonLabel: "Bribe",
-      status: bribeStatus,
-      disabled: !panel.canBribe,
+      requiresCandidate: true,
     },
     {
       kind: "endorse" as const,
-      candidateIndex: 0,
-      title: panel.endorsementUsed && panel.endorsedCandidateIndex === 0
-        ? `Endorsed ${candidateAName}`
-        : `Endorse ${candidateAName}`,
-      description: "Spend city funds to have the mayor endorse this candidate.",
-      buttonLabel: "Endorse",
-      status: panel.endorsementUsed && panel.endorsedCandidateIndex === 0 ? "Endorsed" : "",
+      title: "Mayor endorsement",
+      description: "Spend city funds to have the mayor endorse a selected candidate.",
+      buttonLabel: "Choose",
+      targetButtonLabel: "Endorse",
+      status: panel.endorsementUsed ? `Endorsed ${endorsedName}` : "",
       disabled: !panel.canEndorse || panel.endorsementUsed,
+      requiresCandidate: true,
     },
     {
-      kind: "endorse" as const,
-      candidateIndex: 1,
-      title: panel.endorsementUsed && panel.endorsedCandidateIndex === 1
-        ? `Endorsed ${candidateBName}`
-        : `Endorse ${candidateBName}`,
-      description: "Spend city funds to have the mayor endorse this candidate.",
-      buttonLabel: "Endorse",
-      status: panel.endorsementUsed && panel.endorsedCandidateIndex === 1 ? "Endorsed" : "",
-      disabled: !panel.canEndorse || panel.endorsementUsed,
+      kind: "cashAssistance" as const,
+      title: panel.cashAssistanceTurnoutBonusPercent > 0
+        ? "Cash Assistance funded"
+        : "Cash Assistance",
+      description: "Spend city funds to raise turnout for struggling and modest-income residents.",
+      buttonLabel: "Fund",
+      status: panel.cashAssistanceTurnoutBonusPercent > 0 ? `+${panel.cashAssistanceTurnoutBonusPercent}%` : "",
+      disabled: !panel.canBribe || panel.cashAssistanceTurnoutBonusPercent > 0,
+      requiresCandidate: false,
     },
     {
       kind: "tamper" as const,
-      candidateIndex: 0,
-      title: panel.voteTamperingScheduled && panel.voteTamperingCandidateIndex === 0
-        ? `Vote-count operation planned for ${candidateAName}`
-        : `Tamper with vote count for ${candidateAName}`,
-      description: "Spend city funds to arrange a late election-day disruption.",
-      buttonLabel: "Tamper",
-      status: panel.voteTamperingScheduled && panel.voteTamperingCandidateIndex === 0 ? "Planned" : "",
+      title: "Vote-count tampering",
+      description: "Spend city funds to arrange a late election-day disruption for a selected candidate.",
+      buttonLabel: "Choose",
+      targetButtonLabel: "Tamper",
+      status: panel.voteTamperingScheduled ? `Planned for ${tamperBeneficiaryName}` : "",
       disabled: !panel.canTamper || panel.voteTamperingScheduled,
-    },
-    {
-      kind: "tamper" as const,
-      candidateIndex: 1,
-      title: panel.voteTamperingScheduled && panel.voteTamperingCandidateIndex === 1
-        ? `Vote-count operation planned for ${candidateBName}`
-        : `Tamper with vote count for ${candidateBName}`,
-      description: "Spend city funds to arrange a late election-day disruption.",
-      buttonLabel: "Tamper",
-      status: panel.voteTamperingScheduled && panel.voteTamperingCandidateIndex === 1 ? "Planned" : "",
-      disabled: !panel.canTamper || panel.voteTamperingScheduled,
+      requiresCandidate: true,
     },
     {
       kind: "votingId" as const,
-      candidateIndex: -1,
       title: "Strict voting ID requirements",
       description: "It would reduce turnout for uneducated workers.",
       buttonLabel: "Propose",
       status: votingIdStatus,
       disabled: !panel.canProposeVotingId || panel.votingIdLawPassed || panel.votingIdProposalPending,
+      requiresCandidate: false,
     },
   ];
-  const getActionUnavailableReason = (kind: "bribe" | "endorse" | "tamper" | "votingId"): string => kind === "endorse" && panel.endorsementUsed
+  const getActionUnavailableReason = (kind: "bribe" | "endorse" | "cashAssistance" | "tamper" | "votingId"): string => kind === "endorse" && panel.endorsementUsed
     ? `The mayor already endorsed ${endorsedName} this election cycle.`
+    : kind === "cashAssistance" && panel.cashAssistanceTurnoutBonusPercent > 0
+      ? "Cash Assistance is already funded this election cycle."
     : kind === "tamper" && panel.voteTamperingScheduled
       ? `A vote-count operation is already planned for ${tamperBeneficiaryName} this election cycle.`
     : kind === "votingId" && panel.votingIdLawPassed
@@ -1403,6 +1410,18 @@ function MayorSection(props: { panel: ElectionPanel }): ReactElement {
           : !panel.donationsOpen
             ? "Mayor campaign actions are available during the campaign before election day."
             : "Mayor campaign action unavailable right now.";
+  const runCandidateAction = (kind: CandidateTargetActionKind, candidateIndex: number) => {
+    trigger(
+      mod.id,
+      kind === "endorse"
+        ? "endorseCandidate"
+        : kind === "tamper"
+          ? "tamperVotes"
+          : "bribeMayor",
+      candidateIndex
+    );
+    setPickerActionKind(null);
+  };
 
   return (
     <section className={styles.mayorCard}>
@@ -1463,65 +1482,145 @@ function MayorSection(props: { panel: ElectionPanel }): ReactElement {
         </div>
         <div className={styles.mayorActionList}>
           {mayorActions.map((action) => {
-            const actionEnabled = activeCandidateField &&
-              ((action.kind === "bribe" && panel.canBribe) ||
-                (action.kind === "endorse" && panel.canEndorse && !panel.endorsementUsed) ||
-                (action.kind === "tamper" && panel.canTamper && !panel.voteTamperingScheduled) ||
-                (action.kind === "votingId" && panel.canProposeVotingId && !panel.votingIdLawPassed && !panel.votingIdProposalPending));
+            const actionEnabled = activeCandidateField && !action.disabled;
             const disabledReason = getActionUnavailableReason(action.kind);
             const tooltip = actionEnabled
               ? action.description
               : disabledReason;
+            const isPicking = pickerActionKind === action.kind;
+            let picker: ReactElement | null = null;
+            if (isPicking && isCandidateTargetAction(action.kind)) {
+              const targetActionKind = action.kind;
+              picker = (
+                <CandidateActionPicker
+                  action={action}
+                  candidates={candidateTargets}
+                  onClose={() => setPickerActionKind(null)}
+                  onSelect={(candidateIndex) => runCandidateAction(targetActionKind, candidateIndex)}
+                />
+              );
+            }
 
             return (
-              <article className={styles.mayorActionCard} key={`${action.kind}-${action.candidateIndex}`}>
-                <div className={styles.mayorActionInfo}>
-                  <Tooltip tooltip={action.description}>
-                    <div>
-                      <span className={styles.mayorActionTitle}>{action.title}</span>
-                      <span className={styles.mayorActionDescription}>{action.description}</span>
-                    </div>
-                  </Tooltip>
-                  {action.status && (
-                    <Tooltip tooltip="Current state of this mayor campaign action.">
-                      <strong className={styles.mayorActionStatus}>{action.status}</strong>
+              <div className={styles.mayorActionGroup} key={action.kind}>
+                <article className={`${styles.mayorActionCard} ${isPicking ? styles.mayorActionCardActive : ""}`}>
+                  <div className={styles.mayorActionInfo}>
+                    <Tooltip tooltip={action.description}>
+                      <div>
+                        <span className={styles.mayorActionTitle}>{action.title}</span>
+                        <span className={styles.mayorActionDescription}>{action.description}</span>
+                      </div>
                     </Tooltip>
-                  )}
-                </div>
-                <Tooltip tooltip={tooltip}>
-                  <Button
-                    variant="flat"
-                    className={actionEnabled ? styles.mayorActionButton : `${styles.mayorActionButton} ${styles.bribeButtonDisabled}`}
-                    disabled={!actionEnabled}
-                    aria-disabled={!actionEnabled}
-                    onSelect={() => {
-                      if (actionEnabled) {
-                        if (action.kind === "votingId") {
-                          trigger(mod.id, "proposeVotingIdLaw");
-                        } else {
-                          trigger(
-                            mod.id,
-                            action.kind === "endorse"
-                              ? "endorseCandidate"
-                              : action.kind === "tamper"
-                                ? "tamperVotes"
-                                : "bribeMayor",
-                            action.candidateIndex
-                          );
+                    {action.status && (
+                      <Tooltip tooltip="Current state of this mayor campaign action.">
+                        <strong className={styles.mayorActionStatus}>{action.status}</strong>
+                      </Tooltip>
+                    )}
+                  </div>
+                  <Tooltip tooltip={tooltip}>
+                    <Button
+                      variant="flat"
+                      className={actionEnabled ? styles.mayorActionButton : `${styles.mayorActionButton} ${styles.bribeButtonDisabled}`}
+                      disabled={!actionEnabled}
+                      aria-disabled={!actionEnabled}
+                      onSelect={() => {
+                        if (actionEnabled) {
+                          if (action.requiresCandidate && isCandidateTargetAction(action.kind)) {
+                            setPickerActionKind(isPicking ? null : action.kind);
+                          } else if (action.kind === "votingId") {
+                            trigger(mod.id, "proposeVotingIdLaw");
+                            setPickerActionKind(null);
+                          } else if (action.kind === "cashAssistance") {
+                            trigger(mod.id, "cashAssistance");
+                            setPickerActionKind(null);
+                          }
                         }
-                      }
-                    }}
-                  >
-                    <strong>{actionEnabled ? action.buttonLabel : "Unavailable"}</strong>
-                  </Button>
-                </Tooltip>
-              </article>
+                      }}
+                    >
+                      <strong>{actionEnabled ? action.buttonLabel : "Unavailable"}</strong>
+                    </Button>
+                  </Tooltip>
+                </article>
+                {picker}
+              </div>
             );
           })}
         </div>
       </div>
     </section>
   );
+}
+
+function isCandidateTargetAction(kind: MayorActionKind): kind is CandidateTargetActionKind {
+  return kind === "bribe" || kind === "endorse" || kind === "tamper";
+}
+
+function CandidateActionPicker(props: {
+  action: MayorCampaignAction;
+  candidates: Candidate[];
+  onClose: () => void;
+  onSelect: (candidateIndex: number) => void;
+}): ReactElement {
+  const { action, candidates, onClose, onSelect } = props;
+
+  return (
+    <div className={styles.candidatePickerPanel} role="dialog">
+      <div className={styles.candidatePickerHeader}>
+        <div>
+          <span className={styles.candidatePickerTitle}>{getCandidatePickerTitle(action.kind)}</span>
+          <span className={styles.candidatePickerDescription}>{action.description}</span>
+        </div>
+        <Tooltip tooltip="Close candidate picker.">
+          <Button
+            variant="flat"
+            className={styles.candidatePickerClose}
+            onSelect={onClose}
+          >
+            <strong>X</strong>
+          </Button>
+        </Tooltip>
+      </div>
+      <div className={styles.candidatePickerList}>
+        {candidates.length > 0 ? candidates.map((candidate) => (
+          <article className={styles.candidatePickerCard} key={candidate.index}>
+            <img
+              className={styles.candidatePickerPortrait}
+              src={candidate.portrait || icon}
+              alt=""
+            />
+            <div className={styles.candidatePickerInfo}>
+              <span className={styles.candidatePickerName}>{candidate.name}</span>
+              <span className={styles.candidatePickerMeta}>
+                {candidate.tagName || "Candidate"} - {candidate.effectName || "No platform"}
+              </span>
+            </div>
+            <Button
+              variant="flat"
+              className={styles.candidatePickerButton}
+              onSelect={() => onSelect(candidate.index)}
+            >
+              <strong>{action.targetButtonLabel || action.buttonLabel}</strong>
+            </Button>
+          </article>
+        )) : (
+          <div className={styles.candidatePickerEmpty}>No active candidates right now.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function getCandidatePickerTitle(kind: MayorActionKind): string {
+  switch (kind) {
+    case "bribe":
+      return "Choose platform meeting target";
+    case "endorse":
+      return "Choose endorsement target";
+    case "tamper":
+      return "Choose vote-count target";
+    default:
+      return "Choose candidate";
+  }
 }
 
 function CandidateCard(props: {
@@ -1711,6 +1810,7 @@ function normalizePanel(panel: ElectionPanel | undefined | null): ElectionPanel 
   };
   poll.ageGroups = Array.isArray(poll.ageGroups) ? poll.ageGroups : [];
   poll.educationGroups = Array.isArray(poll.educationGroups) ? poll.educationGroups : [];
+  poll.incomeGroups = Array.isArray(poll.incomeGroups) ? poll.incomeGroups : [];
 
   return {
     ...defaultPanel,

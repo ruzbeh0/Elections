@@ -96,7 +96,8 @@
   font-size: var(--fontSizeS);
   color: var(--menuText2Normal);
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .sideMenu {
@@ -329,7 +330,8 @@
   font-size: var(--fontSizeS);
   font-weight: 700;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
   overflow: hidden;
 }
 
@@ -376,7 +378,8 @@
   font-size: var(--fontSizeM);
   font-weight: 700;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .supportProgramsPanel {
@@ -425,7 +428,8 @@
   font-size: var(--fontSizeM);
   font-weight: 700;
   line-height: 1.15;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .supportProgramDescription {
@@ -434,7 +438,8 @@
   color: var(--menuText2Normal);
   font-size: var(--fontSizeS);
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .supportProgramStatus {
@@ -443,7 +448,8 @@
   font-size: var(--fontSizeS);
   font-weight: 700;
   line-height: 1.15;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .supportProgramButton {
@@ -787,7 +793,8 @@
   line-height: 1.1;
   text-align: left;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .candidateNameLink:hover {
@@ -799,7 +806,8 @@
   color: var(--menuText2Normal);
   font-size: var(--fontSizeS);
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .candidateTag {
@@ -866,7 +874,8 @@
   color: var(--menuText2Normal);
   line-height: 1.15;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .donationTotal strong {
@@ -1338,7 +1347,8 @@
   line-height: 1.1;
   text-align: left;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .mayorNameLink:hover {
@@ -1379,6 +1389,13 @@
   gap: 8rem;
 }
 
+.mayorActionGroup {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rem;
+}
+
 .mayorActionCard {
   min-width: 0;
   display: flex;
@@ -1389,6 +1406,11 @@
   border: 1rem solid rgba(255, 255, 255, 0.1);
   border-radius: 6rem;
   background-color: rgba(0, 0, 0, 0.12);
+}
+
+.mayorActionCardActive {
+  border-color: rgba(177, 108, 255, 0.55);
+  background-color: rgba(177, 108, 255, 0.1);
 }
 
 .mayorActionInfo {
@@ -1405,7 +1427,8 @@
   font-size: var(--fontSizeS);
   font-weight: 700;
   line-height: 1.15;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .mayorActionDescription {
@@ -1414,7 +1437,8 @@
   color: var(--menuText2Normal);
   font-size: var(--fontSizeS);
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .mayorActionStatus {
@@ -1423,7 +1447,8 @@
   font-size: var(--fontSizeS);
   font-weight: 700;
   line-height: 1.15;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .mayorActionButton {
@@ -1441,6 +1466,131 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.candidatePickerPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8rem;
+  padding: 9rem;
+  border: 1rem solid rgba(177, 108, 255, 0.45);
+  border-radius: 6rem;
+  background-color: rgba(20, 22, 28, 0.96);
+  box-shadow: 0 8rem 22rem rgba(0, 0, 0, 0.32);
+}
+
+.candidatePickerHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8rem;
+}
+
+.candidatePickerTitle {
+  display: block;
+  color: var(--accentColorNormal);
+  font-size: var(--fontSizeS);
+  font-weight: 700;
+  line-height: 1.15;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.candidatePickerDescription {
+  display: block;
+  margin-top: 2rem;
+  color: var(--menuText2Normal);
+  font-size: var(--fontSizeS);
+  line-height: 1.2;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.candidatePickerClose {
+  width: 32rem;
+  min-width: 32rem;
+  min-height: 30rem;
+  padding: 3rem;
+  border-radius: 4rem;
+  font-size: var(--fontSizeS);
+}
+
+.candidatePickerList {
+  display: flex;
+  flex-direction: column;
+  gap: 6rem;
+}
+
+.candidatePickerCard {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8rem;
+  padding: 7rem;
+  border: 1rem solid rgba(255, 255, 255, 0.1);
+  border-radius: 5rem;
+  background-color: rgba(0, 0, 0, 0.16);
+}
+
+.candidatePickerPortrait {
+  width: 38rem;
+  height: 38rem;
+  flex: 0 0 38rem;
+  border-radius: 4rem;
+  object-fit: cover;
+  background-color: var(--dividerColor);
+}
+
+.candidatePickerInfo {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.candidatePickerName {
+  color: var(--menuText1Normal);
+  font-size: var(--fontSizeS);
+  font-weight: 700;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidatePickerMeta {
+  color: var(--menuText2Normal);
+  font-size: var(--fontSizeS);
+  line-height: 1.15;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.candidatePickerButton {
+  width: 96rem;
+  min-width: 96rem;
+  min-height: 32rem;
+  padding: 3rem 6rem;
+  border-radius: 4rem;
+  font-size: var(--fontSizeS);
+}
+
+.candidatePickerButton strong,
+.candidatePickerClose strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidatePickerEmpty {
+  min-height: 34rem;
+  display: flex;
+  align-items: center;
+  color: var(--menuText2Normal);
+  font-size: var(--fontSizeS);
+  line-height: 1.2;
 }
 
 .bribeDropdown {
@@ -1471,7 +1621,8 @@
   overflow: visible;
   text-overflow: clip;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .bribeMenu {

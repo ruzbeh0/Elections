@@ -26,6 +26,7 @@ namespace Elections.Systems
     {
         public const int BribeAmount = 5000000;
         public const int MinimumPopulation = 1000;
+        public const int CashAssistanceTurnoutBonusPercent = 20;
 
         private const int kVictoryPartyStartMinute = 19 * 60;
         private const int kVictoryPartySupporterChancePercent = 60;
@@ -674,6 +675,60 @@ namespace Elections.Systems
             EntityManager.SetComponentData(stateEntity, state);
         }
 
+        public void CashAssistance()
+        {
+            Entity stateEntity = EnsureStateEntity();
+            ElectionState state = EntityManager.GetComponentData<ElectionState>(stateEntity);
+            if (!RealisticTripsBridge.TryGetCurrentDateTime(out DateTime now))
+                return;
+
+            PrepareStateForCurrentDate(ref state, now);
+            ProcessPendingBribeMeeting(ref state, now);
+
+            if (!IsDonationOpenStage(state.stage) || !state.HasCandidates || IsElectionDay(state, now))
+            {
+                DebugLog($"Cash Assistance rejected: no active race with candidates. state={DescribeState(state)}");
+                PostElectionChirp("Cash Assistance is only available before election day while an active race has selected candidates.", Entity.Null);
+                EntityManager.SetComponentData(stateEntity, state);
+                return;
+            }
+
+            if (state.cashAssistanceTurnoutBonusPercent > 0)
+            {
+                DebugLog("Cash Assistance rejected: already funded this election cycle.");
+                PostElectionChirp("Cash Assistance has already been funded this election cycle.", Entity.Null);
+                EntityManager.SetComponentData(stateEntity, state);
+                return;
+            }
+
+            if (HasPendingBribeMeeting(state) || state.bribeBlockedUntilTicks > now.Ticks)
+            {
+                DebugLog($"Cash Assistance rejected: mayor schedule is blocked until {new DateTime(state.bribeBlockedUntilTicks):O}.");
+                PostElectionChirp("The mayor's schedule is already reserved for a campaign action today.", state.mayor);
+                EntityManager.SetComponentData(stateEntity, state);
+                return;
+            }
+
+            int bribeAmount = GetCampaignBribeAmount(state);
+            if (!TrySpendCityMoney(bribeAmount))
+            {
+                DebugLog($"Cash Assistance rejected: city could not spend {bribeAmount:n0}.");
+                PostElectionChirp($"The city does not have enough money to fund a {bribeAmount:n0} Cash Assistance operation.", Entity.Null);
+                EntityManager.SetComponentData(stateEntity, state);
+                return;
+            }
+
+            RegisterMayorBribe(ref state, bribeAmount);
+            state.bribeDayKey = ElectionUtility.CurrentCalendarDayKey(World, now);
+            state.bribeBlockedUntilTicks = GetRestOfDayBlockTicks(now);
+            ResetBribeMeetingState(ref state);
+            state.cashAssistanceTurnoutBonusPercent = math.clamp(CashAssistanceTurnoutBonusPercent, 0, 100);
+
+            DebugLog($"Cash Assistance funded: turnoutBonus={CashAssistanceTurnoutBonusPercent}%, cost={bribeAmount:n0}, blockedUntil={new DateTime(state.bribeBlockedUntilTicks):O}.");
+            PostElectionChirp($"Cash Assistance funded. Struggling and modest-income residents get +{CashAssistanceTurnoutBonusPercent}% election turnout.", Entity.Null);
+            EntityManager.SetComponentData(stateEntity, state);
+        }
+
         public void ScheduleVoteTampering(int beneficiaryCandidateIndex)
         {
             Entity stateEntity = EnsureStateEntity();
@@ -1218,6 +1273,7 @@ namespace Elections.Systems
             ResetMayorBribeTrackingState(ref state);
             ResetOutgoingMayorState(ref state);
             ResetSupportProgramState(ref state);
+            ResetCashAssistanceState(ref state);
             ResetStrictVotingIdState(ref state);
             return state;
         }
@@ -1389,6 +1445,7 @@ namespace Elections.Systems
             state.candidateBTagId = ElectionCandidateTags.NormalizeId(state.candidateBTagId);
             state.mayorTagId = ElectionCandidateTags.NormalizeId(state.mayorTagId);
             state.outgoingMayorTagId = ElectionCandidateTags.NormalizeId(state.outgoingMayorTagId);
+            state.appliedEffectTagId = ElectionCandidateTags.NormalizeId(state.appliedEffectTagId);
 
             if (state.candidateATagId != ElectionCandidateTags.None &&
                 state.candidateATagId == state.candidateBTagId)
@@ -1412,6 +1469,9 @@ namespace Elections.Systems
             state.elderlyTurnoutBonusPercent = math.clamp(state.elderlyTurnoutBonusPercent, 0, 100);
             state.uneducatedTurnoutBonusPercent = math.clamp(state.uneducatedTurnoutBonusPercent, 0, 100);
             state.educatedTurnoutBonusPercent = math.clamp(state.educatedTurnoutBonusPercent, 0, 100);
+            state.lowIncomeTurnoutBonusPercent = math.clamp(state.lowIncomeTurnoutBonusPercent, 0, 100);
+            state.transitVoucherTurnoutBonusPercent = math.clamp(state.transitVoucherTurnoutBonusPercent, 0, 100);
+            state.cashAssistanceTurnoutBonusPercent = math.clamp(state.cashAssistanceTurnoutBonusPercent, 0, 100);
         }
 
         private static void MigrateSupportProgramBalance(ref ElectionState state)
@@ -1478,6 +1538,18 @@ namespace Elections.Systems
                         0,
                         100);
                     break;
+                case ElectionSupportProgramType.LowIncomeVoterOutreach:
+                    state.lowIncomeTurnoutBonusPercent = math.clamp(
+                        state.lowIncomeTurnoutBonusPercent + ElectionSupportPrograms.GetBonusPercent(type),
+                        0,
+                        100);
+                    break;
+                case ElectionSupportProgramType.TransitVouchers:
+                    state.transitVoucherTurnoutBonusPercent = math.clamp(
+                        state.transitVoucherTurnoutBonusPercent + ElectionSupportPrograms.GetBonusPercent(type),
+                        0,
+                        100);
+                    break;
             }
         }
 
@@ -1495,6 +1567,10 @@ namespace Elections.Systems
                     return $"Elderly election turnout bonus is now +{state.elderlyTurnoutBonusPercent}%.";
                 case ElectionSupportProgramType.VoterEducation:
                     return $"Uneducated and poorly educated election turnout bonuses are now +{math.max(state.uneducatedTurnoutBonusPercent, state.educatedTurnoutBonusPercent)}%.";
+                case ElectionSupportProgramType.LowIncomeVoterOutreach:
+                    return $"Struggling and modest-income resident turnout bonus is now +{state.lowIncomeTurnoutBonusPercent}%.";
+                case ElectionSupportProgramType.TransitVouchers:
+                    return $"Transit voucher turnout bonus is now +{state.transitVoucherTurnoutBonusPercent}% for eligible residents without cars.";
                 default:
                     return "The civic program is active.";
             }
@@ -1640,7 +1716,14 @@ namespace Elections.Systems
             state.elderlyTurnoutBonusPercent = 0;
             state.uneducatedTurnoutBonusPercent = 0;
             state.educatedTurnoutBonusPercent = 0;
+            state.lowIncomeTurnoutBonusPercent = 0;
+            state.transitVoucherTurnoutBonusPercent = 0;
             state.supportProgramBalanceVersion = kSupportProgramBalanceVersion;
+        }
+
+        private static void ResetCashAssistanceState(ref ElectionState state)
+        {
+            state.cashAssistanceTurnoutBonusPercent = 0;
         }
 
         private static void ResetStrictVotingIdState(ref ElectionState state)
@@ -1681,6 +1764,21 @@ namespace Elections.Systems
             state.pollEducation4VotesA = 0;
             state.pollEducation4VotesB = 0;
             state.pollEducation4Undecided = 0;
+            state.pollIncome0VotesA = 0;
+            state.pollIncome0VotesB = 0;
+            state.pollIncome0Undecided = 0;
+            state.pollIncome1VotesA = 0;
+            state.pollIncome1VotesB = 0;
+            state.pollIncome1Undecided = 0;
+            state.pollIncome2VotesA = 0;
+            state.pollIncome2VotesB = 0;
+            state.pollIncome2Undecided = 0;
+            state.pollIncome3VotesA = 0;
+            state.pollIncome3VotesB = 0;
+            state.pollIncome3Undecided = 0;
+            state.pollIncome4VotesA = 0;
+            state.pollIncome4VotesB = 0;
+            state.pollIncome4Undecided = 0;
         }
 
         private bool IsElectionDay(ElectionState state, DateTime now)
@@ -2106,6 +2204,7 @@ namespace Elections.Systems
             ResetMayorBribeTrackingState(ref state);
             ResetOutgoingMayorState(ref state);
             ResetSupportProgramState(ref state);
+            ResetCashAssistanceState(ref state);
             ResetStrictVotingIdState(ref state);
             int mayorPortraitIndex = GetBaseMayorPortraitIndex(state);
             state.candidateAPortraitIndex = PickDistinctPortraitIndex(candidateA, 17, state.mayor, mayorPortraitIndex, Entity.Null, -1);
@@ -2192,6 +2291,7 @@ namespace Elections.Systems
             int effectId = candidateA ? state.candidateAEffectId : state.candidateBEffectId;
             bool negativeSoftened = candidateA ? state.candidateANegativeSoftened : state.candidateBNegativeSoftened;
             int portraitIndex = candidateA ? state.candidateAPortraitIndex : state.candidateBPortraitIndex;
+            int tagId = candidateA ? state.candidateATagId : state.candidateBTagId;
             string fallbackName = candidateA ? "Candidate A" : "Candidate B";
 
             if (candidate == Entity.Null || !EntityManager.Exists(candidate))
@@ -2200,7 +2300,7 @@ namespace Elections.Systems
                 return;
             }
 
-            ElectionEffectDefinition effect = ElectionEffects.Get(effectId, negativeSoftened);
+            ElectionEffectDefinition effect = ElectionEffects.Get(effectId, negativeSoftened, tagId);
             string name = GetEntityName(candidate, fallbackName);
             string portraitImageSource = CandidatePortraitCatalog.GetPortraitImageSource(EntityManager, candidate, portraitIndex);
             string profileIntro = GetCandidateProfileIntro(state, candidateA);
@@ -2397,6 +2497,8 @@ namespace Elections.Systems
             bool negativeSoftened = candidateA ? state.candidateANegativeSoftened : state.candidateBNegativeSoftened;
             int opponentEffectId = candidateA ? state.candidateBEffectId : state.candidateAEffectId;
             bool opponentNegativeSoftened = candidateA ? state.candidateBNegativeSoftened : state.candidateANegativeSoftened;
+            int tagId = candidateA ? state.candidateATagId : state.candidateBTagId;
+            int opponentTagId = candidateA ? state.candidateBTagId : state.candidateATagId;
 
             if (candidate == Entity.Null || !EntityManager.Exists(candidate))
             {
@@ -2406,8 +2508,8 @@ namespace Elections.Systems
 
             string name = GetEntityName(candidate, fallbackName);
             string opponentName = GetEntityName(opponent, opponentFallbackName);
-            ElectionEffectDefinition effect = ElectionEffects.Get(effectId, negativeSoftened);
-            ElectionEffectDefinition opponentEffect = ElectionEffects.Get(opponentEffectId, opponentNegativeSoftened);
+            ElectionEffectDefinition effect = ElectionEffects.Get(effectId, negativeSoftened, tagId);
+            ElectionEffectDefinition opponentEffect = ElectionEffects.Get(opponentEffectId, opponentNegativeSoftened, opponentTagId);
             string profileIntro = GetCandidateProfileIntro(state, candidateA);
             string portraitImageSource = CandidatePortraitCatalog.GetPortraitImageSource(EntityManager, candidate, portraitIndex);
             bool hasOpponentLink = IsValidChirpCitizen(opponent);
@@ -2712,6 +2814,7 @@ namespace Elections.Systems
                 state.candidateBSoftenAttempted = true;
 
             int effectId = candidateIndex == 0 ? state.candidateAEffectId : state.candidateBEffectId;
+            int tagId = GetCandidateTagId(state, candidateIndex);
             Unity.Mathematics.Random random = CreateCampaignRandom(DateTime.UtcNow, 37717 + candidateIndex * 719 + effectId + totalDonation);
             if (random.NextInt(100) >= 50)
             {
@@ -2724,8 +2827,8 @@ namespace Elections.Systems
             else
                 state.candidateBNegativeSoftened = true;
 
-            ElectionEffectDefinition previous = ElectionEffects.Get(effectId);
-            ElectionEffectDefinition current = ElectionEffects.Get(effectId, true);
+            ElectionEffectDefinition previous = ElectionEffects.Get(effectId, false, tagId);
+            ElectionEffectDefinition current = ElectionEffects.Get(effectId, true, tagId);
             DebugLog($"Platform softened: candidateIndex={candidateIndex}, totalDonation={totalDonation:n0}, effectId={effectId}, {previous.NegativeImpact.Label} {previous.NegativeImpact.ValueText}->{current.NegativeImpact.ValueText}.");
 
             return new PlatformSofteningResult
@@ -2743,7 +2846,8 @@ namespace Elections.Systems
             int oldEffectId = candidateIndex == 0 ? state.candidateAEffectId : state.candidateBEffectId;
             int otherEffectId = candidateIndex == 0 ? state.candidateBEffectId : state.candidateAEffectId;
             bool negativeSoftened = candidateIndex == 0 ? state.candidateANegativeSoftened : state.candidateBNegativeSoftened;
-            ElectionEffectDefinition oldEffect = ElectionEffects.Get(oldEffectId, negativeSoftened);
+            int tagId = GetCandidateTagId(state, candidateIndex);
+            ElectionEffectDefinition oldEffect = ElectionEffects.Get(oldEffectId, negativeSoftened, tagId);
 
             int newEffectId = PickDifferentEffect(candidate, now, 55103 + candidateIndex * 811 + oldEffectId + (int)m_SimulationSystem.frameIndex, otherEffectId);
             for (int attempt = 0; attempt < 64 &&
@@ -2768,7 +2872,7 @@ namespace Elections.Systems
                 state.candidateBPlatformChirpUtcTicks = DateTime.UtcNow.AddMinutes(1).Ticks;
             }
 
-            ElectionEffectDefinition newEffect = ElectionEffects.Get(newEffectId, negativeSoftened);
+            ElectionEffectDefinition newEffect = ElectionEffects.Get(newEffectId, negativeSoftened, tagId);
             DebugLog($"Bribe succeeded: mayor={DescribeEntity(state.mayor, mayorName)}, target={DescribeEntity(candidate, candidateName)}, oldEffect={oldEffectId}, newEffect={newEffectId}, softened={negativeSoftened}.");
             PostMayorPlatformMeetingChirp(state, candidate, mayorName, candidateName, true, oldEffect, newEffect);
         }
@@ -3545,7 +3649,7 @@ namespace Elections.Systems
             ResetBribeMeetingState(ref state, true);
             DebugLog($"Election completed: date={ElectionUtility.FormatCurrentDate(World, now)}, winnerIndex={winnerIndex}, winner={DescribeEntity(winner, winnerName)}, previousMayor={FormatEntity(previousMayor)}, outgoingMayor={FormatEntity(state.outgoingMayor)}, outgoingMayorBribeTotal={state.outgoingMayorBribeTotal:n0}, votesA={state.votesA}, votesB={state.votesB}, voteRequests={state.voteRequests}, voteArrivals={state.voteArrivals}, population={population}, eligibleVoters={eligibleVoters}, turnoutPct={turnoutPct}, effectId={effectId}, tag={ElectionCandidateTags.Get(winnerTagId).Name}.");
 
-            ElectionEffectDefinition effect = ElectionEffects.Get(effectId, winnerNegativeSoftened);
+            ElectionEffectDefinition effect = ElectionEffects.Get(effectId, winnerNegativeSoftened, winnerTagId);
             Entity announcementVenue = IsValidVenue(state.victoryPartyVenue) ? state.victoryPartyVenue : Entity.Null;
             string candidateAName = GetEntityName(state.candidateA, "Candidate A");
             string candidateBName = GetEntityName(state.candidateB, "Candidate B");
@@ -4105,7 +4209,11 @@ namespace Elections.Systems
                         decision = 1;
                     }
 
-                    AddPollSample(ref state, citizens[citizenIndex], decision);
+                    AddPollSample(
+                        ref state,
+                        citizens[citizenIndex],
+                        ElectionUtility.GetWealthBracket(EntityManager, entities[citizenIndex]),
+                        decision);
                 }
             }
 
@@ -4117,7 +4225,8 @@ namespace Elections.Systems
         {
             int dailyTurnout = math.clamp(
                 GetDailyTurnoutPercentForAge(citizen.GetAge(), teenDailyTurnout, adultDailyTurnout, elderlyDailyTurnout) +
-                GetEducationDailyTurnoutBonusPercent(state, citizen.GetEducationLevel()),
+                GetEducationDailyTurnoutBonusPercent(state, citizen.GetEducationLevel()) +
+                ElectionUtility.GetTargetedTurnoutBonusPercent(EntityManager, citizenEntity, citizen, state),
                 1,
                 100);
             dailyTurnout = ElectionCandidateTags.ApplyTurnoutModifier(dailyTurnout, state.candidateATagId, state.candidateBTagId);
@@ -4190,11 +4299,12 @@ namespace Elections.Systems
             }
         }
 
-        private static void AddPollSample(ref ElectionState state, Citizen citizen, int decision)
+        private static void AddPollSample(ref ElectionState state, Citizen citizen, int income, int decision)
         {
             AddPollTotals(ref state, decision);
             AddAgePollBucket(ref state, citizen.GetAge(), decision);
             AddEducationPollBucket(ref state, citizen.GetEducationLevel(), decision);
+            AddIncomePollBucket(ref state, income, decision);
         }
 
         private static void AddPollTotals(ref ElectionState state, int decision)
@@ -4246,6 +4356,28 @@ namespace Elections.Systems
             }
         }
 
+        private static void AddIncomePollBucket(ref ElectionState state, int income, int decision)
+        {
+            switch (math.clamp(income, 0, 4))
+            {
+                case 0:
+                    AddPollBucket(decision, ref state.pollIncome0VotesA, ref state.pollIncome0VotesB, ref state.pollIncome0Undecided);
+                    break;
+                case 1:
+                    AddPollBucket(decision, ref state.pollIncome1VotesA, ref state.pollIncome1VotesB, ref state.pollIncome1Undecided);
+                    break;
+                case 2:
+                    AddPollBucket(decision, ref state.pollIncome2VotesA, ref state.pollIncome2VotesB, ref state.pollIncome2Undecided);
+                    break;
+                case 3:
+                    AddPollBucket(decision, ref state.pollIncome3VotesA, ref state.pollIncome3VotesB, ref state.pollIncome3Undecided);
+                    break;
+                default:
+                    AddPollBucket(decision, ref state.pollIncome4VotesA, ref state.pollIncome4VotesB, ref state.pollIncome4Undecided);
+                    break;
+            }
+        }
+
         private static void AddPollBucket(int decision, ref int votesA, ref int votesB, ref int undecided)
         {
             if (decision == 0)
@@ -4260,6 +4392,7 @@ namespace Elections.Systems
         {
             MoveAgePollBucketVoteToUndecided(ref state, decision);
             MoveEducationPollBucketVoteToUndecided(ref state, decision);
+            MoveIncomePollBucketVoteToUndecided(ref state, decision);
         }
 
         private static void MoveAgePollBucketVoteToUndecided(ref ElectionState state, int decision)
@@ -4306,6 +4439,33 @@ namespace Elections.Systems
             if (TryMovePollBucketVoteToUndecided(ref state.pollEducation1VotesB, ref state.pollEducation1Undecided))
                 return;
             TryMovePollBucketVoteToUndecided(ref state.pollEducation0VotesB, ref state.pollEducation0Undecided);
+        }
+
+        private static void MoveIncomePollBucketVoteToUndecided(ref ElectionState state, int decision)
+        {
+            if (decision == 0)
+            {
+                if (TryMovePollBucketVoteToUndecided(ref state.pollIncome2VotesA, ref state.pollIncome2Undecided))
+                    return;
+                if (TryMovePollBucketVoteToUndecided(ref state.pollIncome3VotesA, ref state.pollIncome3Undecided))
+                    return;
+                if (TryMovePollBucketVoteToUndecided(ref state.pollIncome1VotesA, ref state.pollIncome1Undecided))
+                    return;
+                if (TryMovePollBucketVoteToUndecided(ref state.pollIncome4VotesA, ref state.pollIncome4Undecided))
+                    return;
+                TryMovePollBucketVoteToUndecided(ref state.pollIncome0VotesA, ref state.pollIncome0Undecided);
+                return;
+            }
+
+            if (TryMovePollBucketVoteToUndecided(ref state.pollIncome2VotesB, ref state.pollIncome2Undecided))
+                return;
+            if (TryMovePollBucketVoteToUndecided(ref state.pollIncome3VotesB, ref state.pollIncome3Undecided))
+                return;
+            if (TryMovePollBucketVoteToUndecided(ref state.pollIncome1VotesB, ref state.pollIncome1Undecided))
+                return;
+            if (TryMovePollBucketVoteToUndecided(ref state.pollIncome4VotesB, ref state.pollIncome4Undecided))
+                return;
+            TryMovePollBucketVoteToUndecided(ref state.pollIncome0VotesB, ref state.pollIncome0Undecided);
         }
 
         private static bool TryMovePollBucketVoteToUndecided(ref int decidedVotes, ref int undecided)

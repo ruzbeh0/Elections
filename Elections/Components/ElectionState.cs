@@ -13,8 +13,8 @@ namespace Elections.Components
 
     public struct ElectionState : IComponentData, IQueryTypeParameter, ISerializable
     {
-        public const int CurrentVersion = 19;
-        private const int CurrentSerializedLayoutVersion = 19;
+        public const int CurrentVersion = 22;
+        private const int CurrentSerializedLayoutVersion = 22;
 
         public int version;
         public bool initialized;
@@ -91,6 +91,21 @@ namespace Elections.Components
         public int pollEducation4VotesA;
         public int pollEducation4VotesB;
         public int pollEducation4Undecided;
+        public int pollIncome0VotesA;
+        public int pollIncome0VotesB;
+        public int pollIncome0Undecided;
+        public int pollIncome1VotesA;
+        public int pollIncome1VotesB;
+        public int pollIncome1Undecided;
+        public int pollIncome2VotesA;
+        public int pollIncome2VotesB;
+        public int pollIncome2Undecided;
+        public int pollIncome3VotesA;
+        public int pollIncome3VotesB;
+        public int pollIncome3Undecided;
+        public int pollIncome4VotesA;
+        public int pollIncome4VotesB;
+        public int pollIncome4Undecided;
         public bool candidateAPollResponseChirpSent;
         public bool candidateBPollResponseChirpSent;
         public long candidateAPollResponseChirpUtcTicks;
@@ -143,6 +158,7 @@ namespace Elections.Components
         public int appliedModifierType2;
         public float appliedModifierAdd2;
         public float appliedModifierMul2;
+        public int appliedEffectTagId;
 
         public int bribeDayKey;
         public long corruptionInvestigationChirpUtcTicks;
@@ -184,12 +200,15 @@ namespace Elections.Components
         public int elderlyTurnoutBonusPercent;
         public int uneducatedTurnoutBonusPercent;
         public int educatedTurnoutBonusPercent;
+        public int lowIncomeTurnoutBonusPercent;
+        public int transitVoucherTurnoutBonusPercent;
         public int supportProgramBalanceVersion;
         public bool strictVotingIdLawPassed;
         public bool strictVotingIdProposalPending;
         public bool strictVotingIdProposalPassed;
         public long strictVotingIdChirpUtcTicks;
         public bool strictVotingIdChirpSent;
+        public int cashAssistanceTurnoutBonusPercent;
 
         public bool HasCandidates => candidateA != Entity.Null && candidateB != Entity.Null;
 
@@ -260,6 +279,21 @@ namespace Elections.Components
             writer.Write(pollEducation4VotesA);
             writer.Write(pollEducation4VotesB);
             writer.Write(pollEducation4Undecided);
+            writer.Write(pollIncome0VotesA);
+            writer.Write(pollIncome0VotesB);
+            writer.Write(pollIncome0Undecided);
+            writer.Write(pollIncome1VotesA);
+            writer.Write(pollIncome1VotesB);
+            writer.Write(pollIncome1Undecided);
+            writer.Write(pollIncome2VotesA);
+            writer.Write(pollIncome2VotesB);
+            writer.Write(pollIncome2Undecided);
+            writer.Write(pollIncome3VotesA);
+            writer.Write(pollIncome3VotesB);
+            writer.Write(pollIncome3Undecided);
+            writer.Write(pollIncome4VotesA);
+            writer.Write(pollIncome4VotesB);
+            writer.Write(pollIncome4Undecided);
             writer.Write(candidateAPollResponseChirpSent);
             writer.Write(candidateBPollResponseChirpSent);
             writer.Write(candidateAPollResponseChirpUtcTicks);
@@ -361,6 +395,10 @@ namespace Elections.Components
             writer.Write(candidateBTagId);
             writer.Write(mayorTagId);
             writer.Write(outgoingMayorTagId);
+            writer.Write(appliedEffectTagId);
+            writer.Write(lowIncomeTurnoutBonusPercent);
+            writer.Write(transitVoucherTurnoutBonusPercent);
+            writer.Write(cashAssistanceTurnoutBonusPercent);
         }
 
         public void Deserialize<TReader>(TReader reader) where TReader : IReader
@@ -471,6 +509,29 @@ namespace Elections.Components
                 pollEducation4VotesA = 0;
                 pollEducation4VotesB = 0;
                 pollEducation4Undecided = 0;
+            }
+
+            if (layoutVersion >= 20)
+            {
+                reader.Read(out pollIncome0VotesA);
+                reader.Read(out pollIncome0VotesB);
+                reader.Read(out pollIncome0Undecided);
+                reader.Read(out pollIncome1VotesA);
+                reader.Read(out pollIncome1VotesB);
+                reader.Read(out pollIncome1Undecided);
+                reader.Read(out pollIncome2VotesA);
+                reader.Read(out pollIncome2VotesB);
+                reader.Read(out pollIncome2Undecided);
+                reader.Read(out pollIncome3VotesA);
+                reader.Read(out pollIncome3VotesB);
+                reader.Read(out pollIncome3Undecided);
+                reader.Read(out pollIncome4VotesA);
+                reader.Read(out pollIncome4VotesB);
+                reader.Read(out pollIncome4Undecided);
+            }
+            else
+            {
+                ClearIncomePollBreakdown();
             }
 
             reader.Read(out candidateAPollResponseChirpSent);
@@ -780,6 +841,51 @@ namespace Elections.Components
                 mayorTagId = 0;
                 outgoingMayorTagId = 0;
             }
+
+            if (layoutVersion >= 22)
+            {
+                reader.Read(out appliedEffectTagId);
+                reader.Read(out lowIncomeTurnoutBonusPercent);
+                reader.Read(out transitVoucherTurnoutBonusPercent);
+                reader.Read(out cashAssistanceTurnoutBonusPercent);
+            }
+            else if (layoutVersion >= 21)
+            {
+                reader.Read(out appliedEffectTagId);
+                reader.Read(out lowIncomeTurnoutBonusPercent);
+                reader.Read(out transitVoucherTurnoutBonusPercent);
+                reader.Read(out int legacyCandidateACashAssistanceSupportPercent);
+                reader.Read(out int legacyCandidateBCashAssistanceSupportPercent);
+                cashAssistanceTurnoutBonusPercent = legacyCandidateACashAssistanceSupportPercent > legacyCandidateBCashAssistanceSupportPercent
+                    ? legacyCandidateACashAssistanceSupportPercent
+                    : legacyCandidateBCashAssistanceSupportPercent;
+            }
+            else
+            {
+                appliedEffectTagId = 0;
+                lowIncomeTurnoutBonusPercent = 0;
+                transitVoucherTurnoutBonusPercent = 0;
+                cashAssistanceTurnoutBonusPercent = 0;
+            }
+        }
+
+        private void ClearIncomePollBreakdown()
+        {
+            pollIncome0VotesA = 0;
+            pollIncome0VotesB = 0;
+            pollIncome0Undecided = 0;
+            pollIncome1VotesA = 0;
+            pollIncome1VotesB = 0;
+            pollIncome1Undecided = 0;
+            pollIncome2VotesA = 0;
+            pollIncome2VotesB = 0;
+            pollIncome2Undecided = 0;
+            pollIncome3VotesA = 0;
+            pollIncome3VotesB = 0;
+            pollIncome3Undecided = 0;
+            pollIncome4VotesA = 0;
+            pollIncome4VotesB = 0;
+            pollIncome4Undecided = 0;
         }
 
         private static int GetSerializedLayoutVersion(int serializedVersion)

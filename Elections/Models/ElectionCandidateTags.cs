@@ -55,9 +55,11 @@ namespace Elections.Models
         public const int BusinessFriendly = 23;
         public const int NeighborhoodChampion = 24;
         public const int Polarizing = 25;
+        public const int Revolutionary = 26;
+        public const int Cautious = 27;
 
         public const int TagChancePercent = 75;
-        public const int Count = 25;
+        public const int Count = 27;
 
         private static readonly ElectionCandidateTagDefinition s_None = new ElectionCandidateTagDefinition(
             None,
@@ -92,7 +94,9 @@ namespace Elections.Models
             new ElectionCandidateTagDefinition(Environmentalist, "Environmentalist", "+8% support from students and well educated residents.", ElectionCandidateTagTone.Advantage),
             new ElectionCandidateTagDefinition(BusinessFriendly, "Business friendly", "+8% support from workers and wealthy residents.", ElectionCandidateTagTone.Advantage),
             new ElectionCandidateTagDefinition(NeighborhoodChampion, "Neighborhood champion", "+6% support from low- and middle-income residents.", ElectionCandidateTagTone.Advantage),
-            new ElectionCandidateTagDefinition(Polarizing, "Polarizing", "Election turnout increases by 15%.", ElectionCandidateTagTone.Mixed)
+            new ElectionCandidateTagDefinition(Polarizing, "Polarizing", "Election turnout increases by 15%.", ElectionCandidateTagTone.Mixed),
+            new ElectionCandidateTagDefinition(Revolutionary, "Revolutionary", "Doubles this candidate's positive and negative platform effects.", ElectionCandidateTagTone.Mixed),
+            new ElectionCandidateTagDefinition(Cautious, "Cautious", "Halves this candidate's positive and negative platform effects, but reduces overall voter support by 5%.", ElectionCandidateTagTone.Mixed)
         };
 
         public static ElectionCandidateTagDefinition Get(int tagId)
@@ -210,8 +214,23 @@ namespace Elections.Models
                     return voterWorker || voterWealth >= 3 ? 0.08f : 0f;
                 case NeighborhoodChampion:
                     return voterWealth <= 2 ? 0.06f : 0f;
+                case Cautious:
+                    return -0.05f;
                 default:
                     return 0f;
+            }
+        }
+
+        public static float GetPlatformEffectScale(int tagId)
+        {
+            switch (NormalizeId(tagId))
+            {
+                case Revolutionary:
+                    return 2f;
+                case Cautious:
+                    return 0.5f;
+                default:
+                    return 1f;
             }
         }
 

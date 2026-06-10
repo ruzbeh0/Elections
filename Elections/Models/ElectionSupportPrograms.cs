@@ -8,7 +8,9 @@ namespace Elections.Models
         TeenVoterEducation = 1,
         AdultVoterEducation = 2,
         ElderlyVoterEducation = 3,
-        VoterEducation = 4
+        VoterEducation = 4,
+        LowIncomeVoterOutreach = 5,
+        TransitVouchers = 6
     }
 
     internal readonly struct ElectionSupportProgramDefinition
@@ -30,12 +32,14 @@ namespace Elections.Models
 
     internal static class ElectionSupportPrograms
     {
-        public const int Count = 5;
+        public const int Count = 7;
         public const int LegacyTurnoutProgramDailyBonusPercent = 10;
         public const int TeenTurnoutProgramDailyBonusPercent = 30;
         public const int AdultTurnoutProgramDailyBonusPercent = 10;
         public const int ElderlyTurnoutProgramDailyBonusPercent = 15;
         public const int EducationTurnoutProgramDailyBonusPercent = 10;
+        public const int LowIncomeTurnoutProgramDailyBonusPercent = 10;
+        public const int TransitVoucherTurnoutProgramDailyBonusPercent = 5;
 
         public static bool TryGet(int index, out ElectionSupportProgramDefinition definition)
         {
@@ -76,6 +80,20 @@ namespace Elections.Models
                         $"Adds +{EducationTurnoutProgramDailyBonusPercent}% uneducated and poorly educated election turnout.",
                         $"Fund a voter education program for uneducated and poorly educated residents. Each program adds +{EducationTurnoutProgramDailyBonusPercent}% to election turnout for those education groups.");
                     return true;
+                case ElectionSupportProgramType.LowIncomeVoterOutreach:
+                    definition = new ElectionSupportProgramDefinition(
+                        ElectionSupportProgramType.LowIncomeVoterOutreach,
+                        "Low-income voter outreach",
+                        $"Adds +{LowIncomeTurnoutProgramDailyBonusPercent}% election turnout for struggling and modest-income residents.",
+                        $"Fund direct voter outreach for struggling and modest-income residents. Each program adds +{LowIncomeTurnoutProgramDailyBonusPercent}% to election turnout for those income groups.");
+                    return true;
+                case ElectionSupportProgramType.TransitVouchers:
+                    definition = new ElectionSupportProgramDefinition(
+                        ElectionSupportProgramType.TransitVouchers,
+                        "Transit vouchers",
+                        $"Adds +{TransitVoucherTurnoutProgramDailyBonusPercent}% election turnout for teens, elderly, and low-income residents without cars.",
+                        $"Fund transit vouchers for teens, elderly residents, and struggling or modest-income residents who do not have a car. Each program adds +{TransitVoucherTurnoutProgramDailyBonusPercent}% to election turnout for eligible residents.");
+                    return true;
                 default:
                     definition = default;
                     return false;
@@ -99,6 +117,10 @@ namespace Elections.Models
                     return ElderlyTurnoutProgramDailyBonusPercent;
                 case ElectionSupportProgramType.VoterEducation:
                     return EducationTurnoutProgramDailyBonusPercent;
+                case ElectionSupportProgramType.LowIncomeVoterOutreach:
+                    return LowIncomeTurnoutProgramDailyBonusPercent;
+                case ElectionSupportProgramType.TransitVouchers:
+                    return TransitVoucherTurnoutProgramDailyBonusPercent;
                 default:
                     return 0;
             }

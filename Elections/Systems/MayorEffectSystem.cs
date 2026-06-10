@@ -43,7 +43,8 @@ namespace Elections.Systems
             Entity stateEntity = m_StateQuery.GetSingletonEntity();
             ElectionState state = EntityManager.GetComponentData<ElectionState>(stateEntity);
             bool appliedEffectMatches = state.appliedEffectId == state.mayorEffectId &&
-                                        state.appliedNegativeSoftened == state.mayorNegativeSoftened;
+                                        state.appliedNegativeSoftened == state.mayorNegativeSoftened &&
+                                        state.appliedEffectTagId == state.mayorTagId;
 
             if (appliedEffectMatches && state.mayorMoneyApplied)
             {
@@ -60,14 +61,14 @@ namespace Elections.Systems
 
             if (!appliedEffectMatches)
             {
-                ElectionDebug.Log($"Mayor effect changed: appliedEffectId={state.appliedEffectId}, mayorEffectId={state.mayorEffectId}, softened={state.mayorNegativeSoftened}. Removing old modifiers before applying the new effect.");
+                ElectionDebug.Log($"Mayor effect changed: appliedEffectId={state.appliedEffectId}, mayorEffectId={state.mayorEffectId}, softened={state.mayorNegativeSoftened}, appliedTag={state.appliedEffectTagId}, mayorTag={state.mayorTagId}. Removing old modifiers before applying the new effect.");
                 RealisticTripsBridge.ClearMayorResourceConsumptionMultiplier(state.appliedEffectId);
                 RemoveAppliedModifiers(city, ref state);
             }
 
             if (state.mayorEffectId > 0)
             {
-                ElectionEffectDefinition effect = ElectionEffects.Get(state.mayorEffectId, state.mayorNegativeSoftened);
+                ElectionEffectDefinition effect = ElectionEffects.Get(state.mayorEffectId, state.mayorNegativeSoftened, state.mayorTagId);
                 SyncRealisticTripsEffect(effect);
 
                 if (!state.mayorMoneyApplied)
@@ -84,6 +85,7 @@ namespace Elections.Systems
                     ApplyModifiers(city, effect, ref state);
                     state.appliedEffectId = state.mayorEffectId;
                     state.appliedNegativeSoftened = state.mayorNegativeSoftened;
+                    state.appliedEffectTagId = state.mayorTagId;
                 }
             }
             else
@@ -92,6 +94,7 @@ namespace Elections.Systems
                 RealisticTripsBridge.ClearMayorResourceConsumptionMultiplier(0);
                 state.mayorMoneyApplied = true;
                 state.appliedNegativeSoftened = false;
+                state.appliedEffectTagId = state.mayorTagId;
             }
 
             EntityManager.SetComponentData(stateEntity, state);
@@ -178,7 +181,7 @@ namespace Elections.Systems
                 return;
             }
 
-            SyncRealisticTripsEffect(ElectionEffects.Get(state.mayorEffectId, state.mayorNegativeSoftened));
+            SyncRealisticTripsEffect(ElectionEffects.Get(state.mayorEffectId, state.mayorNegativeSoftened, state.mayorTagId));
         }
 
         private static void SyncRealisticTripsEffect(ElectionEffectDefinition effect)
@@ -220,6 +223,7 @@ namespace Elections.Systems
 
             state.appliedEffectId = 0;
             state.appliedNegativeSoftened = false;
+            state.appliedEffectTagId = 0;
             state.appliedModifierType1 = -1;
             state.appliedModifierAdd1 = 0f;
             state.appliedModifierMul1 = 0f;

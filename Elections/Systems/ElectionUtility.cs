@@ -100,8 +100,8 @@ namespace Elections.Systems
         public static float GetVoteProbabilityForA(EntityManager entityManager, Entity voter, Citizen voterData, ElectionState state)
         {
             VoterProfile profile = CreateVoterProfile(entityManager, voter, voterData);
-            ElectionEffectDefinition candidateAEffect = ElectionEffects.Get(state.candidateAEffectId, state.candidateANegativeSoftened);
-            ElectionEffectDefinition candidateBEffect = ElectionEffects.Get(state.candidateBEffectId, state.candidateBNegativeSoftened);
+            ElectionEffectDefinition candidateAEffect = ElectionEffects.Get(state.candidateAEffectId, state.candidateANegativeSoftened, state.candidateATagId);
+            ElectionEffectDefinition candidateBEffect = ElectionEffects.Get(state.candidateBEffectId, state.candidateBNegativeSoftened, state.candidateBTagId);
 
             float scoreA = CandidateAffinity(profile, state.candidateAAge, state.candidateAEducation, state.candidateAWorkType, state.candidateAWealth) +
                            PlatformPreference(profile, candidateAEffect) +
@@ -122,6 +122,37 @@ namespace Elections.Systems
                 CandidateTagPreference(profile, state.candidateBTagId);
             float personalLean = StableVoterLean(voter) * 0.035f;
             return math.clamp(0.5f + (scoreA - scoreB) * 0.09f + donationInfluence + endorsementInfluence + candidateTagInfluence + personalLean, 0.08f, 0.92f);
+        }
+
+        public static int GetTargetedTurnoutBonusPercent(EntityManager entityManager, Entity citizenEntity, Citizen citizen, ElectionState state)
+        {
+            int bonus = 0;
+            if (IsLowIncomeResident(entityManager, citizenEntity))
+            {
+                bonus += state.lowIncomeTurnoutBonusPercent;
+                bonus += state.cashAssistanceTurnoutBonusPercent;
+            }
+
+            if (IsTransitVoucherEligible(entityManager, citizenEntity, citizen))
+                bonus += state.transitVoucherTurnoutBonusPercent;
+
+            return bonus;
+        }
+
+        public static bool IsLowIncomeResident(EntityManager entityManager, Entity citizenEntity)
+        {
+            return GetWealthBracket(entityManager, citizenEntity) <= 1;
+        }
+
+        public static bool IsTransitVoucherEligible(EntityManager entityManager, Entity citizenEntity, Citizen citizen)
+        {
+            if (entityManager.HasComponent<CarKeeper>(citizenEntity))
+                return false;
+
+            CitizenAge age = citizen.GetAge();
+            return age == CitizenAge.Teen ||
+                   age == CitizenAge.Elderly ||
+                   IsLowIncomeResident(entityManager, citizenEntity);
         }
 
         public static float GetVotingTurnoutMultiplier(Citizen citizen)
@@ -378,7 +409,7 @@ namespace Elections.Systems
             if (state.mayorEffectId <= 0)
                 return 0f;
 
-            ElectionEffectDefinition mayorEffect = ElectionEffects.Get(state.mayorEffectId, state.mayorNegativeSoftened);
+            ElectionEffectDefinition mayorEffect = ElectionEffects.Get(state.mayorEffectId, state.mayorNegativeSoftened, state.mayorTagId);
             float similarity = 0f;
             if (effect.PositiveImpact.Key == mayorEffect.PositiveImpact.Key)
                 similarity += 0.5f;

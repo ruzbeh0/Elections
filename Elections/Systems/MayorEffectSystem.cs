@@ -36,7 +36,7 @@ namespace Elections.Systems
 
             if (!Mod.m_Setting.EnableElections || m_StateQuery.IsEmptyIgnoreFilter)
             {
-                RealisticTripsBridge.ClearMayorResourceConsumptionMultiplier(0);
+                CleanupAppliedEffect();
                 return;
             }
 
@@ -94,6 +94,41 @@ namespace Elections.Systems
                 state.appliedNegativeSoftened = false;
             }
 
+            EntityManager.SetComponentData(stateEntity, state);
+        }
+
+        protected override void OnDestroy()
+        {
+            CleanupAppliedEffect();
+            base.OnDestroy();
+        }
+
+        public void CleanupAppliedEffect()
+        {
+            RealisticTripsBridge.ClearMayorResourceConsumptionMultiplier(0);
+            if (m_StateQuery.IsEmptyIgnoreFilter)
+                return;
+
+            Entity stateEntity = m_StateQuery.GetSingletonEntity();
+            if (stateEntity == Entity.Null || !EntityManager.Exists(stateEntity))
+                return;
+
+            ElectionState state = EntityManager.GetComponentData<ElectionState>(stateEntity);
+            if (state.appliedEffectId > 0)
+                RealisticTripsBridge.ClearMayorResourceConsumptionMultiplier(state.appliedEffectId);
+
+            if (state.appliedEffectId <= 0 &&
+                state.appliedModifierType1 < 0 &&
+                state.appliedModifierType2 < 0)
+            {
+                return;
+            }
+
+            Entity city = m_CitySystem != null ? m_CitySystem.City : Entity.Null;
+            if (city == Entity.Null || !EntityManager.Exists(city))
+                return;
+
+            RemoveAppliedModifiers(city, ref state);
             EntityManager.SetComponentData(stateEntity, state);
         }
 

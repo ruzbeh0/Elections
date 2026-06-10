@@ -61,6 +61,10 @@
   width: 540rem;
 }
 
+.subPanelPrograms {
+  width: 567rem;
+}
+
 .subPanelWide {
   width: 460rem;
 }
@@ -463,6 +467,237 @@
   opacity: 0.45;
 }
 
+.residenceCard {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10rem;
+  padding: 10rem;
+  border-radius: 6rem;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.selectedBuildingBox {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5rem;
+  padding: 8rem;
+  border-radius: 5rem;
+  background-color: rgba(0, 0, 0, 0.14);
+}
+
+.selectedBuildingBox span {
+  color: var(--menuText2Normal);
+  font-size: var(--fontSizeS);
+  line-height: 1.1;
+}
+
+.selectedBuildingBox strong {
+  min-width: 0;
+  color: var(--accentColorNormal);
+  font-size: var(--fontSizeM);
+  font-weight: 700;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selectedBuildingTags {
+  display: flex;
+  align-items: center;
+  gap: 5rem;
+}
+
+.targetTagActive,
+.targetTagMuted,
+.targetTagPending {
+  flex: 0 0 auto;
+  padding: 3rem 6rem;
+  border-radius: 4rem;
+  font-size: var(--fontSizeS);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.targetTagActive {
+  color: #ffffff !important;
+  background-color: rgba(98, 210, 111, 0.36);
+  box-shadow: inset 0 0 0 1rem rgba(98, 210, 111, 0.48);
+}
+
+.targetTagMuted {
+  color: var(--menuText2Normal) !important;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.targetTagPending {
+  color: #ffffff !important;
+  background-color: rgba(177, 108, 255, 0.28);
+  box-shadow: inset 0 0 0 1rem rgba(177, 108, 255, 0.34);
+}
+
+.residenceTargetCard {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rem;
+  padding: 8rem;
+  border: 1rem solid rgba(255, 255, 255, 0.1);
+  border-radius: 6rem;
+  background-color: rgba(0, 0, 0, 0.12);
+}
+
+.residenceTargetHeader {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8rem;
+}
+
+.residenceTargetTitle {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3rem;
+}
+
+.residenceTargetTitle span {
+  color: var(--menuText2Normal);
+  font-size: var(--fontSizeS);
+  line-height: 1.1;
+}
+
+.residenceTargetTitle strong {
+  min-width: 0;
+  color: var(--accentColorNormal);
+  font-size: var(--fontSizeM);
+  font-weight: 700;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.residenceDropdownToggle {
+  width: 100%;
+  min-width: 0;
+  min-height: 34rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  padding: 5rem 8rem;
+  border: 1rem solid rgba(255, 255, 255, 0.12);
+  border-radius: 4rem;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: var(--menuText1Normal);
+}
+
+.residenceDropdownToggle span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fontSizeS);
+  font-weight: 700;
+}
+
+.residenceDropdownMenu {
+  width: 360rem;
+  max-height: 360rem;
+  min-width: 260rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  padding: 5rem;
+  border: 1rem solid rgba(255, 255, 255, 0.14);
+  border-radius: 5rem;
+  background-color: rgba(25, 28, 34, 0.98);
+  box-shadow: 0 8rem 22rem rgba(0, 0, 0, 0.32);
+  color: #ffffff;
+  overflow-y: auto;
+}
+
+.residenceDropdownItem {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 6rem 7rem;
+  border-radius: 4rem;
+  background-color: rgba(255, 255, 255, 0.04);
+  color: #ffffff !important;
+}
+
+.residenceDropdownItem:hover,
+.residenceDropdownItem:focus {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.residenceDropdownItemSelected {
+  background-color: rgba(98, 210, 111, 0.32);
+  box-shadow: inset 0 0 0 1rem rgba(98, 210, 111, 0.42);
+}
+
+.residenceDropdownItemText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.residenceDropdownItemText {
+  color: #ffffff !important;
+  font-size: var(--fontSizeS);
+  font-weight: 700;
+}
+
+.residenceDropdownHint,
+.residenceDropdownUnavailable {
+  min-width: 0;
+  padding: 6rem 8rem;
+  border-radius: 4rem;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: var(--fontSizeS);
+  line-height: 1.2;
+}
+
+.residenceDropdownUnavailable {
+  background-color: rgba(0, 0, 0, 0.14);
+}
+
+.residenceMetaGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6rem;
+}
+
+.residenceActionRow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6rem;
+}
+
+.residenceActionButton {
+  width: 112rem;
+  min-width: 112rem;
+  min-height: 32rem;
+  padding: 4rem 6rem;
+  border-radius: 4rem;
+  font-size: var(--fontSizeS);
+}
+
+.residenceActionButton strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .candidateGrid {
   display: flex;
   align-items: stretch;
@@ -565,6 +800,57 @@
   font-size: var(--fontSizeS);
   line-height: 1.2;
   overflow-wrap: anywhere;
+}
+
+.candidateTag {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6rem;
+  padding: 5rem 7rem;
+  border-radius: 4rem;
+  background-color: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1rem rgba(255, 255, 255, 0.12);
+  font-size: var(--fontSizeS);
+  line-height: 1.18;
+}
+
+.candidateTag span {
+  min-width: 0;
+  color: #ffffff !important;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidateTag strong {
+  min-width: 0;
+  color: var(--menuText2Normal);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidateTagPositive {
+  background-color: rgba(98, 210, 111, 0.14);
+  box-shadow: inset 0 0 0 1rem rgba(98, 210, 111, 0.3);
+}
+
+.candidateTagNegative {
+  background-color: rgba(255, 107, 107, 0.13);
+  box-shadow: inset 0 0 0 1rem rgba(255, 107, 107, 0.28);
+}
+
+.candidateTagMixed {
+  background-color: rgba(255, 196, 87, 0.13);
+  box-shadow: inset 0 0 0 1rem rgba(255, 196, 87, 0.26);
+}
+
+.candidateTagNeutral {
+  background-color: rgba(255, 255, 255, 0.07);
 }
 
 .donationTotal {

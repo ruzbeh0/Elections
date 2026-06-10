@@ -3,9 +3,13 @@ using Elections.Components;
 using Elections.Models;
 using Elections.Bridge;
 using Game;
+using Game.Buildings;
+using Game.Prefabs;
 using Game.Rendering;
 using Game.UI;
+using Game.UI.InGame;
 using System;
+using System.Collections.Generic;
 using Unity.Entities;
 using Unity.Mathematics;
 
@@ -13,10 +17,28 @@ namespace Elections.Systems
 {
     public partial class ElectionUISystem : UISystemBase
     {
+        private const int kMayorChoiceCacheRefreshUpdates = 8;
+
         private EntityQuery m_StateQuery;
         private NameSystem m_NameSystem;
         private CameraUpdateSystem m_CameraUpdateSystem;
         private ElectionLifecycleSystem m_LifecycleSystem;
+        private MayorWorkplaceSystem m_MayorWorkplaceSystem;
+        private PrefabSystem m_PrefabSystem;
+        private SelectedInfoUISystem m_SelectedInfoUISystem;
+        private readonly List<Entity> m_MayorHomeChoices = new List<Entity>();
+        private readonly List<Entity> m_MayorWorkplaceChoices = new List<Entity>();
+        private bool m_MayorChoiceCacheValid;
+        private bool m_MayorHomeChoicesLimited;
+        private bool m_MayorWorkplaceChoicesLimited;
+        private int m_UpdateSerial;
+        private int m_MayorChoiceCacheUpdateSerial;
+        private Entity m_CachedChoiceMayor;
+        private Entity m_CachedChoiceTargetHome;
+        private Entity m_CachedChoiceTargetWorkplace;
+        private Entity m_CachedChoiceCurrentHome;
+        private Entity m_CachedChoiceCurrentWorkplace;
+        private Entity m_CachedChoiceSelectedBuilding;
         private RawValueBinding m_PanelBinding;
         private ValueBinding<bool> m_UseUniversalModMenuBinding;
         private ValueBinding<bool> m_ShowVotingLocationsBinding;
@@ -38,6 +60,9 @@ namespace Elections.Systems
             m_NameSystem = World.GetExistingSystemManaged<NameSystem>();
             m_CameraUpdateSystem = World.GetOrCreateSystemManaged<CameraUpdateSystem>();
             m_LifecycleSystem = World.GetOrCreateSystemManaged<ElectionLifecycleSystem>();
+            m_MayorWorkplaceSystem = World.GetOrCreateSystemManaged<MayorWorkplaceSystem>();
+            m_PrefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            m_SelectedInfoUISystem = World.GetOrCreateSystemManaged<SelectedInfoUISystem>();
             ShowVotingLocations = false;
 
             AddBinding(m_PanelBinding = new RawValueBinding(Mod.Id, "panel", WritePanel));
@@ -58,11 +83,18 @@ namespace Elections.Systems
             AddBinding(new TriggerBinding<int>(Mod.Id, "tamperVotes", TamperVotes));
             AddBinding(new TriggerBinding(Mod.Id, "proposeVotingIdLaw", ProposeVotingIdLaw));
             AddBinding(new TriggerBinding<bool>(Mod.Id, "setShowVotingLocations", SetShowVotingLocations));
+            AddBinding(new TriggerBinding(Mod.Id, "useSelectedMayorHome", UseSelectedMayorHome));
+            AddBinding(new TriggerBinding(Mod.Id, "useSelectedMayorWorkplace", UseSelectedMayorWorkplace));
+            AddBinding(new TriggerBinding<int, int>(Mod.Id, "setMayorHome", SetMayorHome));
+            AddBinding(new TriggerBinding<int, int>(Mod.Id, "setMayorWorkplace", SetMayorWorkplace));
+            AddBinding(new TriggerBinding(Mod.Id, "focusMayorHome", FocusMayorHome));
+            AddBinding(new TriggerBinding(Mod.Id, "focusMayorWorkplace", FocusMayorWorkplace));
         }
 
         protected override void OnUpdate()
         {
             base.OnUpdate();
+            m_UpdateSerial++;
 
             if (ShowVotingLocations && !(Mod.m_Setting?.EnableElections ?? false))
                 SetShowVotingLocations(false);
@@ -117,6 +149,56 @@ namespace Elections.Systems
             m_ShowVotingLocationsBinding?.Update(ShowVotingLocations);
         }
 
+        private void UseSelectedMayorHome()
+        {
+            Entity selected = m_SelectedInfoUISystem != null ? m_SelectedInfoUISystem.selectedEntity : Entity.Null;
+            if (m_MayorWorkplaceSystem != null && m_MayorWorkplaceSystem.TrySetMayorHome(selected))
+            {
+                InvalidateMayorChoiceCache();
+                m_PanelBinding?.Update();
+            }
+        }
+
+        private void UseSelectedMayorWorkplace()
+        {
+            Entity selected = m_SelectedInfoUISystem != null ? m_SelectedInfoUISystem.selectedEntity : Entity.Null;
+            if (m_MayorWorkplaceSystem != null && m_MayorWorkplaceSystem.TrySetMayorWorkplace(selected))
+            {
+                InvalidateMayorChoiceCache();
+                m_PanelBinding?.Update();
+            }
+        }
+
+        private void SetMayorHome(int entityIndex, int entityVersion)
+        {
+            Entity home = new Entity
+            {
+                Index = entityIndex,
+                Version = entityVersion
+            };
+
+            if (m_MayorWorkplaceSystem != null && m_MayorWorkplaceSystem.TrySetMayorHome(home))
+            {
+                InvalidateMayorChoiceCache();
+                m_PanelBinding?.Update();
+            }
+        }
+
+        private void SetMayorWorkplace(int entityIndex, int entityVersion)
+        {
+            Entity workplace = new Entity
+            {
+                Index = entityIndex,
+                Version = entityVersion
+            };
+
+            if (m_MayorWorkplaceSystem != null && m_MayorWorkplaceSystem.TrySetMayorWorkplace(workplace))
+            {
+                InvalidateMayorChoiceCache();
+                m_PanelBinding?.Update();
+            }
+        }
+
         private void FocusCandidate(int candidateIndex)
         {
             if (!TryGetPreparedState(out ElectionState state))
@@ -132,6 +214,22 @@ namespace Elections.Systems
                 return;
 
             NavigateTo(state.mayor);
+        }
+
+        private void FocusMayorHome()
+        {
+            if (!TryGetPreparedState(out ElectionState state) || m_MayorWorkplaceSystem == null)
+                return;
+
+            NavigateTo(m_MayorWorkplaceSystem.GetEffectiveMayorHome(state));
+        }
+
+        private void FocusMayorWorkplace()
+        {
+            if (!TryGetPreparedState(out ElectionState state) || m_MayorWorkplaceSystem == null)
+                return;
+
+            NavigateTo(m_MayorWorkplaceSystem.GetEffectiveMayorWorkplace(state));
         }
 
         private void NavigateTo(Entity entity)
@@ -200,6 +298,7 @@ namespace Elections.Systems
                 writer.PropertyName("candidateA"); WriteEmptyCandidate(writer, 0, "Candidate A");
                 writer.PropertyName("candidateB"); WriteEmptyCandidate(writer, 1, "Candidate B");
                 WriteEmptyMayor(writer);
+                WriteMayorResidence(writer, default(ElectionState), false);
                 writer.TypeEnd();
                 return;
             }
@@ -271,6 +370,7 @@ namespace Elections.Systems
             else
                 WriteEmptyCandidate(writer, 1, "Candidate B");
             WriteMayor(writer, state);
+            WriteMayorResidence(writer, state, true);
             writer.TypeEnd();
         }
 
@@ -295,9 +395,13 @@ namespace Elections.Systems
             int index = candidateA ? 0 : 1;
             int effectId = candidateA ? state.candidateAEffectId : state.candidateBEffectId;
             int portraitIndex = candidateA ? state.candidateAPortraitIndex : state.candidateBPortraitIndex;
+            int tagId = candidateA ? state.candidateATagId : state.candidateBTagId;
             int donationAmount = candidateA ? state.donationA : state.donationB;
             ElectionEffectDefinition effect = ElectionEffects.Get(effectId, candidateA ? state.candidateANegativeSoftened : state.candidateBNegativeSoftened);
             int donationBonusPercent = (int)math.round(ElectionDonationTiers.GetBonusForAmount(donationAmount, state.campaignDonationAmount) * 100f);
+            ElectionDonationTiers.TryGet(0, state.campaignDonationAmount, out ElectionDonationTier donationTier);
+            int donationCost = ElectionCandidateTags.GetDonationCost(tagId, donationTier.Amount);
+            ElectionCandidateTagDefinition tag = ElectionCandidateTags.Get(tagId);
             bool canFocus = candidate != Entity.Null && EntityManager.Exists(candidate);
 
             writer.TypeBegin("ElectionCandidate");
@@ -307,10 +411,14 @@ namespace Elections.Systems
             writer.PropertyName("portrait"); writer.Write(CandidatePortraitCatalog.GetPortraitImageSource(EntityManager, candidate, portraitIndex));
             writer.PropertyName("canFocus"); writer.Write(canFocus);
             writer.PropertyName("bio"); writer.Write(GetCandidateBio(state, candidateA));
+            writer.PropertyName("tagName"); writer.Write(tag.Name);
+            writer.PropertyName("tagDescription"); writer.Write(tag.Description);
+            writer.PropertyName("tagTone"); writer.Write(tag.Tone.ToString());
             writer.PropertyName("effectName"); writer.Write(effect.Name);
             writer.PropertyName("effectDescription"); writer.Write($"If elected, this platform {effect.Description}.");
             writer.PropertyName("platformImpacts"); WritePlatformImpacts(writer, effect);
             writer.PropertyName("donationAmount"); writer.Write(donationAmount);
+            writer.PropertyName("donationCost"); writer.Write(donationCost);
             writer.PropertyName("donationBonusPercent"); writer.Write(donationBonusPercent);
             writer.PropertyName("donated"); writer.Write(donationAmount > 0);
             writer.TypeEnd();
@@ -325,10 +433,14 @@ namespace Elections.Systems
             writer.PropertyName("portrait"); writer.Write(string.Empty);
             writer.PropertyName("canFocus"); writer.Write(false);
             writer.PropertyName("bio"); writer.Write(string.Empty);
+            writer.PropertyName("tagName"); writer.Write(string.Empty);
+            writer.PropertyName("tagDescription"); writer.Write(string.Empty);
+            writer.PropertyName("tagTone"); writer.Write(ElectionCandidateTagTone.Neutral.ToString());
             writer.PropertyName("effectName"); writer.Write("No platform");
             writer.PropertyName("effectDescription"); writer.Write("No candidate has been selected yet.");
             writer.PropertyName("platformImpacts"); WriteEmptyPlatformImpacts(writer);
             writer.PropertyName("donationAmount"); writer.Write(0);
+            writer.PropertyName("donationCost"); writer.Write(0);
             writer.PropertyName("donationBonusPercent"); writer.Write(0);
             writer.PropertyName("donated"); writer.Write(false);
             writer.TypeEnd();
@@ -337,6 +449,7 @@ namespace Elections.Systems
         private void WriteMayor(IJsonWriter writer, ElectionState state)
         {
             ElectionEffectDefinition effect = ElectionEffects.Get(state.mayorEffectId, state.mayorNegativeSoftened);
+            ElectionCandidateTagDefinition tag = ElectionCandidateTags.Get(state.mayorTagId);
             bool canFocus = state.mayor != Entity.Null && EntityManager.Exists(state.mayor);
             string mayorName = GetEntityName(state.mayor, string.Empty);
 
@@ -349,6 +462,9 @@ namespace Elections.Systems
             writer.PropertyName("mayorEffectDescription"); writer.Write(state.mayorEffectId == 0
                 ? "Temporary mayoral platform. No city modifiers are applied; this mayor supervises the transition until an elected mayor takes office."
                 : $"Current mayoral platform. It {effect.Description}.");
+            writer.PropertyName("mayorTagName"); writer.Write(tag.Name);
+            writer.PropertyName("mayorTagDescription"); writer.Write(tag.Description);
+            writer.PropertyName("mayorTagTone"); writer.Write(tag.Tone.ToString());
             writer.PropertyName("mayorPlatformImpacts");
             if (state.mayorEffectId == 0)
                 WriteEmptyPlatformImpacts(writer);
@@ -376,8 +492,198 @@ namespace Elections.Systems
             writer.PropertyName("mayorCanFocus"); writer.Write(false);
             writer.PropertyName("mayorEffectName"); writer.Write(string.Empty);
             writer.PropertyName("mayorEffectDescription"); writer.Write(string.Empty);
+            writer.PropertyName("mayorTagName"); writer.Write(string.Empty);
+            writer.PropertyName("mayorTagDescription"); writer.Write(string.Empty);
+            writer.PropertyName("mayorTagTone"); writer.Write(ElectionCandidateTagTone.Neutral.ToString());
             writer.PropertyName("mayorPlatformImpacts"); WriteEmptyPlatformImpacts(writer);
             writer.PropertyName("mayorTemporary"); writer.Write(false);
+        }
+
+        private void WriteMayorResidence(IJsonWriter writer, ElectionState state, bool hasState)
+        {
+            Entity targetHome = hasState && m_MayorWorkplaceSystem != null
+                ? m_MayorWorkplaceSystem.GetEffectiveMayorHome(state)
+                : Entity.Null;
+            Entity targetWorkplace = hasState && m_MayorWorkplaceSystem != null
+                ? m_MayorWorkplaceSystem.GetEffectiveMayorWorkplace(state)
+                : Entity.Null;
+            Entity currentHome = hasState && m_MayorWorkplaceSystem != null
+                ? m_MayorWorkplaceSystem.GetCurrentMayorHome(state.mayor)
+                : Entity.Null;
+            Entity currentWorkplace = hasState && m_MayorWorkplaceSystem != null
+                ? m_MayorWorkplaceSystem.GetCurrentMayorWorkplace(state.mayor)
+                : Entity.Null;
+            Entity selectedBuilding = m_SelectedInfoUISystem != null ? m_SelectedInfoUISystem.selectedEntity : Entity.Null;
+            bool selectedCanBeHome = m_MayorWorkplaceSystem != null && m_MayorWorkplaceSystem.IsValidMayorHome(selectedBuilding);
+            bool selectedCanBeWorkplace = m_MayorWorkplaceSystem != null && m_MayorWorkplaceSystem.IsValidMayorWorkplace(selectedBuilding);
+
+            if (hasState && m_MayorWorkplaceSystem != null)
+            {
+                EnsureMayorChoiceCache(state.mayor, targetHome, targetWorkplace, currentHome, currentWorkplace, selectedBuilding, state);
+            }
+            else
+            {
+                InvalidateMayorChoiceCache();
+            }
+
+            writer.PropertyName("mayorHome");
+            WriteMayorBuildingTarget(
+                writer,
+                targetHome,
+                currentHome,
+                "No low-density residence selected",
+                targetHome != Entity.Null ? m_MayorWorkplaceSystem.GetHomeCapacity(targetHome) : 0,
+                targetHome != Entity.Null ? m_MayorWorkplaceSystem.GetHomeOccupantCount(targetHome) : 0);
+
+            writer.PropertyName("mayorWorkplace");
+            WriteMayorBuildingTarget(
+                writer,
+                targetWorkplace,
+                currentWorkplace,
+                "No City Hall selected",
+                targetWorkplace != Entity.Null ? m_MayorWorkplaceSystem.GetWorkplaceCapacity(targetWorkplace) : 0,
+                targetWorkplace != Entity.Null ? m_MayorWorkplaceSystem.GetWorkplaceOccupantCount(targetWorkplace) : 0);
+
+            writer.PropertyName("mayorSelectedBuilding");
+            writer.TypeBegin("MayorSelectedBuilding");
+            writer.PropertyName("exists"); writer.Write(selectedBuilding != Entity.Null && EntityManager.Exists(selectedBuilding));
+            writer.PropertyName("name"); writer.Write(GetBuildingLabel(selectedBuilding, "No building selected"));
+            writer.PropertyName("entityLabel"); writer.Write(FormatEntity(selectedBuilding));
+            writer.PropertyName("canBeHome"); writer.Write(selectedCanBeHome);
+            writer.PropertyName("canBeWorkplace"); writer.Write(selectedCanBeWorkplace);
+            writer.PropertyName("isHomeTarget"); writer.Write(selectedBuilding != Entity.Null && selectedBuilding == targetHome);
+            writer.PropertyName("isWorkplaceTarget"); writer.Write(selectedBuilding != Entity.Null && selectedBuilding == targetWorkplace);
+            writer.TypeEnd();
+
+            writer.PropertyName("mayorHomeChoices");
+            WriteMayorBuildingChoices(writer, m_MayorHomeChoices, targetHome, true);
+            writer.PropertyName("mayorWorkplaceChoices");
+            WriteMayorBuildingChoices(writer, m_MayorWorkplaceChoices, targetWorkplace, false);
+            writer.PropertyName("mayorHomeChoicesLimited"); writer.Write(m_MayorHomeChoicesLimited);
+            writer.PropertyName("mayorWorkplaceChoicesLimited"); writer.Write(m_MayorWorkplaceChoicesLimited);
+        }
+
+        private void EnsureMayorChoiceCache(
+            Entity mayor,
+            Entity targetHome,
+            Entity targetWorkplace,
+            Entity currentHome,
+            Entity currentWorkplace,
+            Entity selectedBuilding,
+            ElectionState state)
+        {
+            if (m_MayorChoiceCacheValid &&
+                m_UpdateSerial - m_MayorChoiceCacheUpdateSerial < kMayorChoiceCacheRefreshUpdates &&
+                m_CachedChoiceMayor == mayor &&
+                m_CachedChoiceTargetHome == targetHome &&
+                m_CachedChoiceTargetWorkplace == targetWorkplace &&
+                m_CachedChoiceCurrentHome == currentHome &&
+                m_CachedChoiceCurrentWorkplace == currentWorkplace &&
+                m_CachedChoiceSelectedBuilding == selectedBuilding)
+            {
+                return;
+            }
+
+            m_MayorHomeChoices.Clear();
+            m_MayorWorkplaceChoices.Clear();
+            m_MayorHomeChoicesLimited = m_MayorWorkplaceSystem.BuildMayorHomeChoices(m_MayorHomeChoices, state, currentHome, selectedBuilding);
+            m_MayorWorkplaceChoicesLimited = m_MayorWorkplaceSystem.BuildMayorWorkplaceChoices(m_MayorWorkplaceChoices, state, currentWorkplace, selectedBuilding);
+            m_MayorChoiceCacheValid = true;
+            m_MayorChoiceCacheUpdateSerial = m_UpdateSerial;
+            m_CachedChoiceMayor = mayor;
+            m_CachedChoiceTargetHome = targetHome;
+            m_CachedChoiceTargetWorkplace = targetWorkplace;
+            m_CachedChoiceCurrentHome = currentHome;
+            m_CachedChoiceCurrentWorkplace = currentWorkplace;
+            m_CachedChoiceSelectedBuilding = selectedBuilding;
+        }
+
+        private void InvalidateMayorChoiceCache()
+        {
+            m_MayorChoiceCacheValid = false;
+            m_MayorHomeChoices.Clear();
+            m_MayorWorkplaceChoices.Clear();
+            m_MayorHomeChoicesLimited = false;
+            m_MayorWorkplaceChoicesLimited = false;
+            m_CachedChoiceMayor = Entity.Null;
+            m_CachedChoiceTargetHome = Entity.Null;
+            m_CachedChoiceTargetWorkplace = Entity.Null;
+            m_CachedChoiceCurrentHome = Entity.Null;
+            m_CachedChoiceCurrentWorkplace = Entity.Null;
+            m_CachedChoiceSelectedBuilding = Entity.Null;
+        }
+
+        private void WriteMayorBuildingTarget(
+            IJsonWriter writer,
+            Entity target,
+            Entity current,
+            string emptyTargetName,
+            int capacity,
+            int occupants)
+        {
+            bool targetExists = target != Entity.Null && EntityManager.Exists(target);
+            bool currentExists = current != Entity.Null && EntityManager.Exists(current);
+
+            writer.TypeBegin("MayorBuildingTarget");
+            writer.PropertyName("exists"); writer.Write(targetExists);
+            writer.PropertyName("name"); writer.Write(GetBuildingLabel(target, emptyTargetName));
+            writer.PropertyName("entityLabel"); writer.Write(FormatEntity(target));
+            writer.PropertyName("capacity"); writer.Write(capacity);
+            writer.PropertyName("occupants"); writer.Write(occupants);
+            writer.PropertyName("currentName"); writer.Write(GetBuildingLabel(current, "Unknown"));
+            writer.PropertyName("currentEntityLabel"); writer.Write(FormatEntity(current));
+            writer.PropertyName("currentExists"); writer.Write(currentExists);
+            writer.PropertyName("atTarget"); writer.Write(targetExists && currentExists && target == current);
+            writer.PropertyName("canFocus"); writer.Write(targetExists);
+            writer.TypeEnd();
+        }
+
+        private void WriteMayorBuildingChoices(IJsonWriter writer, List<Entity> choices, Entity selectedTarget, bool homeChoices)
+        {
+            writer.ArrayBegin(choices.Count);
+            for (int i = 0; i < choices.Count; i++)
+            {
+                Entity choice = choices[i];
+                int capacity = homeChoices
+                    ? m_MayorWorkplaceSystem.GetHomeCapacity(choice)
+                    : m_MayorWorkplaceSystem.GetWorkplaceCapacity(choice);
+                int occupants = homeChoices
+                    ? m_MayorWorkplaceSystem.GetHomeOccupantCount(choice)
+                    : m_MayorWorkplaceSystem.GetWorkplaceOccupantCount(choice);
+
+                writer.TypeBegin("MayorBuildingChoice");
+                writer.PropertyName("index"); writer.Write(i);
+                writer.PropertyName("name"); writer.Write(GetBuildingLabel(choice, homeChoices ? "Residence" : "City Hall"));
+                writer.PropertyName("entityLabel"); writer.Write(FormatEntity(choice));
+                writer.PropertyName("entityIndex"); writer.Write(choice.Index);
+                writer.PropertyName("entityVersion"); writer.Write(choice.Version);
+                writer.PropertyName("capacity"); writer.Write(capacity);
+                writer.PropertyName("occupants"); writer.Write(occupants);
+                writer.PropertyName("selected"); writer.Write(selectedTarget != Entity.Null && choice == selectedTarget);
+                writer.TypeEnd();
+            }
+            writer.ArrayEnd();
+        }
+
+        private string GetBuildingLabel(Entity entity, string fallback)
+        {
+            if (entity == Entity.Null || !EntityManager.Exists(entity))
+                return fallback;
+
+            string label = m_NameSystem != null ? m_NameSystem.GetRenderedLabelName(entity) : string.Empty;
+            if (string.IsNullOrWhiteSpace(label) || label.IndexOf("Assets.", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                if (EntityManager.HasComponent<PrefabRef>(entity))
+                {
+                    PrefabRef prefabRef = EntityManager.GetComponentData<PrefabRef>(entity);
+                    label = m_PrefabSystem.GetPrefabName(prefabRef.m_Prefab);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(label))
+                label = fallback;
+
+            return label;
         }
 
         private static void WritePlatformImpacts(IJsonWriter writer, ElectionEffectDefinition effect)
@@ -742,12 +1048,21 @@ namespace Elections.Systems
 
         private static int GetCampaignBribeAmount(ElectionState state)
         {
-            return state.campaignBribeAmount > 0 ? state.campaignBribeAmount : ElectionLifecycleSystem.BribeAmount;
+            int baseAmount = state.campaignBribeAmount > 0 ? state.campaignBribeAmount : ElectionLifecycleSystem.BribeAmount;
+            return ElectionCandidateTags.GetMayorActionCost(state.mayorTagId, baseAmount);
         }
 
         private string GetEntityName(Entity entity, string fallback)
         {
             return ElectionNameUtility.GetCitizenFullName(m_NameSystem, EntityManager, entity, fallback);
+        }
+
+        private static string FormatEntity(Entity entity)
+        {
+            if (entity == Entity.Null)
+                return "Entity.Null";
+
+            return $"Entity({entity.Index}:{entity.Version})";
         }
     }
 }

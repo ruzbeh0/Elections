@@ -13,8 +13,8 @@ namespace Elections.Components
 
     public struct ElectionState : IComponentData, IQueryTypeParameter, ISerializable
     {
-        public const int CurrentVersion = 17;
-        private const int CurrentSerializedLayoutVersion = 17;
+        public const int CurrentVersion = 19;
+        private const int CurrentSerializedLayoutVersion = 19;
 
         public int version;
         public bool initialized;
@@ -45,6 +45,8 @@ namespace Elections.Components
         public int candidateBWealth;
         public int candidateAPortraitIndex;
         public int candidateBPortraitIndex;
+        public int candidateATagId;
+        public int candidateBTagId;
         public bool candidateAPlatformChirpSent;
         public bool candidateBPlatformChirpSent;
         public int candidateAPlatformChirpDayKey;
@@ -129,6 +131,9 @@ namespace Elections.Components
         public int mayorEffectTermYear;
         public bool mayorNegativeSoftened;
         public bool mayorMoneyApplied;
+        public Entity mayorHome;
+        public Entity mayorWorkplace;
+        public int mayorTagId;
 
         public int appliedEffectId;
         public bool appliedNegativeSoftened;
@@ -170,6 +175,7 @@ namespace Elections.Components
         public int mayorBribeTotal;
         public Entity outgoingMayor;
         public int outgoingMayorBribeTotal;
+        public int outgoingMayorTagId;
         public bool electionDayHolidayScheduled;
         public int supportProgramDayKey;
         public int supportProgramIdToday;
@@ -349,6 +355,12 @@ namespace Elections.Components
             writer.Write(strictVotingIdChirpUtcTicks);
             writer.Write(strictVotingIdChirpSent);
             writer.Write(supportProgramBalanceVersion);
+            writer.Write(mayorHome);
+            writer.Write(mayorWorkplace);
+            writer.Write(candidateATagId);
+            writer.Write(candidateBTagId);
+            writer.Write(mayorTagId);
+            writer.Write(outgoingMayorTagId);
         }
 
         public void Deserialize<TReader>(TReader reader) where TReader : IReader
@@ -741,6 +753,32 @@ namespace Elections.Components
             else
             {
                 supportProgramBalanceVersion = 0;
+            }
+
+            if (layoutVersion >= 18)
+            {
+                reader.Read(out mayorHome);
+                reader.Read(out mayorWorkplace);
+            }
+            else
+            {
+                mayorHome = Entity.Null;
+                mayorWorkplace = Entity.Null;
+            }
+
+            if (layoutVersion >= 19)
+            {
+                reader.Read(out candidateATagId);
+                reader.Read(out candidateBTagId);
+                reader.Read(out mayorTagId);
+                reader.Read(out outgoingMayorTagId);
+            }
+            else
+            {
+                candidateATagId = 0;
+                candidateBTagId = 0;
+                mayorTagId = 0;
+                outgoingMayorTagId = 0;
             }
         }
 

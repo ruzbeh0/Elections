@@ -29,6 +29,9 @@ namespace Elections.Systems
         private readonly Dictionary<Entity, VoteTally> m_CurrentVoteTallies = new Dictionary<Entity, VoteTally>(128);
         private readonly HashSet<Entity> m_PollingPlaceSet = new HashSet<Entity>();
         private int m_LastTalliedElectionDayKey;
+        private int m_LastTalliedVoteArrivals;
+        private int m_LastTalliedVotesA;
+        private int m_LastTalliedVotesB;
 
         protected override void OnCreate()
         {
@@ -63,12 +66,10 @@ namespace Elections.Systems
             }
 
             if (showVoteCounts)
-                TallyVotes(state.electionDayKey);
+                TallyVotes(state);
             else
             {
-                m_VoteTallies.Clear();
-                m_CurrentVoteTallies.Clear();
-                m_LastTalliedElectionDayKey = 0;
+                ClearTallies();
             }
 
             m_PollingPlaceSet.Clear();
@@ -127,31 +128,44 @@ namespace Elections.Systems
             });
         }
 
-        private void TallyVotes(int electionDayKey)
+        private void TallyVotes(ElectionState state)
         {
+            int electionDayKey = state.electionDayKey;
             if (m_LastTalliedElectionDayKey != electionDayKey)
             {
                 m_VoteTallies.Clear();
                 m_LastTalliedElectionDayKey = electionDayKey;
+                m_LastTalliedVoteArrivals = -1;
+                m_LastTalliedVotesA = -1;
+                m_LastTalliedVotesB = -1;
+            }
+
+            if (m_LastTalliedVoteArrivals == state.voteArrivals &&
+                m_LastTalliedVotesA == state.votesA &&
+                m_LastTalliedVotesB == state.votesB)
+            {
+                return;
             }
 
             m_CurrentVoteTallies.Clear();
 
-            using (NativeArray<ElectionVoteTrip> voteTrips = m_VoteTripQuery.ToComponentDataArray<ElectionVoteTrip>(Allocator.Temp))
+            using (NativeArray<ElectionVoteTrip> voteTrips = m_VoteTripQuery.ToComponentDataArray<ElectionVoteTrip>(Allocator.TempJob))
+            using (NativeParallelHashMap<Entity, VoteTally> tallies = new NativeParallelHashMap<Entity, VoteTally>(math.max(1, voteTrips.Length), Allocator.TempJob))
             {
-                for (int i = 0; i < voteTrips.Length; i++)
+                new TallyVotesByPollingPlaceJob
                 {
-                    ElectionVoteTrip voteTrip = voteTrips[i];
-                    if (!voteTrip.voted || voteTrip.electionDayKey != electionDayKey || voteTrip.pollingPlace == Entity.Null)
-                        continue;
+                    voteTrips = voteTrips,
+                    electionDayKey = electionDayKey,
+                    tallies = tallies
+                }.Schedule().Complete();
 
-                    m_CurrentVoteTallies.TryGetValue(voteTrip.pollingPlace, out VoteTally tally);
-                    if (voteTrip.chosenCandidate == 0)
-                        tally.votesA++;
-                    else if (voteTrip.chosenCandidate == 1)
-                        tally.votesB++;
-
-                    m_CurrentVoteTallies[voteTrip.pollingPlace] = tally;
+                using (NativeKeyValueArrays<Entity, VoteTally> keyValues = tallies.GetKeyValueArrays(Allocator.Temp))
+                {
+                    for (int i = 0; i < keyValues.Length; i++)
+                    {
+                        Entity pollingPlace = keyValues.Keys[i];
+                        m_CurrentVoteTallies[pollingPlace] = keyValues.Values[i];
+                    }
                 }
             }
 
@@ -163,6 +177,20 @@ namespace Elections.Systems
                 displayed.votesB = math.max(displayed.votesB, current.votesB);
                 m_VoteTallies[entry.Key] = displayed;
             }
+
+            m_LastTalliedVoteArrivals = state.voteArrivals;
+            m_LastTalliedVotesA = state.votesA;
+            m_LastTalliedVotesB = state.votesB;
+        }
+
+        private void ClearTallies()
+        {
+            m_VoteTallies.Clear();
+            m_CurrentVoteTallies.Clear();
+            m_LastTalliedElectionDayKey = 0;
+            m_LastTalliedVoteArrivals = -1;
+            m_LastTalliedVotesA = -1;
+            m_LastTalliedVotesB = -1;
         }
 
         private void AddPollingPlaces(EntityQuery query, NativeList<VotingLocationMarker> markers, bool showVoteCounts, ElectionState state)
@@ -220,6 +248,32 @@ namespace Elections.Systems
             public float3 position;
             public int votesA;
             public int votesB;
+        }
+
+        [BurstCompile]
+        private struct TallyVotesByPollingPlaceJob : IJob
+        {
+            [ReadOnly] public NativeArray<ElectionVoteTrip> voteTrips;
+            public int electionDayKey;
+            public NativeParallelHashMap<Entity, VoteTally> tallies;
+
+            public void Execute()
+            {
+                for (int i = 0; i < voteTrips.Length; i++)
+                {
+                    ElectionVoteTrip voteTrip = voteTrips[i];
+                    if (!voteTrip.voted || voteTrip.electionDayKey != electionDayKey || voteTrip.pollingPlace == Entity.Null)
+                        continue;
+
+                    tallies.TryGetValue(voteTrip.pollingPlace, out VoteTally tally);
+                    if (voteTrip.chosenCandidate == 0)
+                        tally.votesA++;
+                    else if (voteTrip.chosenCandidate == 1)
+                        tally.votesB++;
+
+                    tallies[voteTrip.pollingPlace] = tally;
+                }
+            }
         }
 
         [BurstCompile]

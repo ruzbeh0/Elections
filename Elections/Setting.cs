@@ -11,7 +11,7 @@ using Unity.Entities;
 
 namespace Elections
 {
-    [FileLocation(nameof(Elections))]
+    [FileLocation($"ModsSettings\\{nameof(Elections)}\\{nameof(Elections)}")]
     [SettingsUIGroupOrder(kGeneralGroup, kVotingGroup, kCampaignGroup, kDebugGroup)]
     [SettingsUIShowGroupName(kGeneralGroup, kVotingGroup, kCampaignGroup, kDebugGroup)]
     public class Setting : ModSetting
@@ -52,6 +52,7 @@ namespace Elections
 
         public Setting(IMod mod) : base(mod)
         {
+            SetDefaults();
         }
 
         [SettingsUISection(kSection, kGeneralGroup)]

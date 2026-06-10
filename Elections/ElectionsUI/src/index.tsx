@@ -1,6 +1,6 @@
 import { type ModRegistrar } from "cs2/modding";
 import { bindValue, trigger, useValue } from "cs2/api";
-import { Button, Icon, Tooltip } from "cs2/ui";
+import { Button, Dropdown, DropdownItem, DropdownToggle, Icon, Tooltip } from "cs2/ui";
 import { type ReactElement, useEffect, useMemo, useState } from "react";
 
 import icon from "images/elections.svg";
@@ -40,10 +40,14 @@ type Candidate = {
   portrait: string;
   canFocus: boolean;
   bio: string;
+  tagName: string;
+  tagDescription: string;
+  tagTone: string;
   effectName: string;
   effectDescription: string;
   platformImpacts: PlatformImpact[];
   donationAmount: number;
+  donationCost: number;
   donationBonusPercent: number;
   donated: boolean;
 };
@@ -71,6 +75,40 @@ type PollBreakdown = PollResult & {
 type Poll = PollResult & {
   ageGroups: PollBreakdown[];
   educationGroups: PollBreakdown[];
+};
+
+type MayorBuildingTarget = {
+  exists: boolean;
+  name: string;
+  entityLabel: string;
+  capacity: number;
+  occupants: number;
+  currentName: string;
+  currentEntityLabel: string;
+  currentExists: boolean;
+  atTarget: boolean;
+  canFocus: boolean;
+};
+
+type MayorBuildingChoice = {
+  index: number;
+  name: string;
+  entityLabel: string;
+  entityIndex: number;
+  entityVersion: number;
+  capacity: number;
+  occupants: number;
+  selected: boolean;
+};
+
+type MayorSelectedBuilding = {
+  exists: boolean;
+  name: string;
+  entityLabel: string;
+  canBeHome: boolean;
+  canBeWorkplace: boolean;
+  isHomeTarget: boolean;
+  isWorkplaceTarget: boolean;
 };
 
 type ElectionPanel = {
@@ -120,11 +158,21 @@ type ElectionPanel = {
   mayorCanFocus: boolean;
   mayorEffectName: string;
   mayorEffectDescription: string;
+  mayorTagName: string;
+  mayorTagDescription: string;
+  mayorTagTone: string;
   mayorPlatformImpacts: PlatformImpact[];
   mayorTemporary: boolean;
+  mayorHome: MayorBuildingTarget;
+  mayorWorkplace: MayorBuildingTarget;
+  mayorHomeChoices: MayorBuildingChoice[];
+  mayorWorkplaceChoices: MayorBuildingChoice[];
+  mayorHomeChoicesLimited: boolean;
+  mayorWorkplaceChoicesLimited: boolean;
+  mayorSelectedBuilding: MayorSelectedBuilding;
 };
 
-type PanelSection = "votingSites" | "mayor" | "schedule" | "programs" | "candidates";
+type PanelSection = "votingSites" | "mayor" | "residence" | "schedule" | "programs" | "candidates";
 
 const emptyCandidate = (index: number, name: string): Candidate => ({
   index,
@@ -133,13 +181,40 @@ const emptyCandidate = (index: number, name: string): Candidate => ({
   portrait: "",
   canFocus: false,
   bio: "",
+  tagName: "",
+  tagDescription: "",
+  tagTone: "Neutral",
   effectName: "No platform",
   effectDescription: "No candidate has been selected yet.",
   platformImpacts: [],
   donationAmount: 0,
+  donationCost: 0,
   donationBonusPercent: 0,
   donated: false,
 });
+
+const emptyMayorBuildingTarget = (name: string): MayorBuildingTarget => ({
+  exists: false,
+  name,
+  entityLabel: "Entity.Null",
+  capacity: 0,
+  occupants: 0,
+  currentName: "Unknown",
+  currentEntityLabel: "Entity.Null",
+  currentExists: false,
+  atTarget: false,
+  canFocus: false,
+});
+
+const emptyMayorSelectedBuilding: MayorSelectedBuilding = {
+  exists: false,
+  name: "No building selected",
+  entityLabel: "Entity.Null",
+  canBeHome: false,
+  canBeWorkplace: false,
+  isHomeTarget: false,
+  isWorkplaceTarget: false,
+};
 
 const defaultPanel: ElectionPanel = {
   enabled: true,
@@ -203,8 +278,18 @@ const defaultPanel: ElectionPanel = {
   mayorCanFocus: false,
   mayorEffectName: "",
   mayorEffectDescription: "",
+  mayorTagName: "",
+  mayorTagDescription: "",
+  mayorTagTone: "Neutral",
   mayorPlatformImpacts: [],
   mayorTemporary: false,
+  mayorHome: emptyMayorBuildingTarget("No low-density residence selected"),
+  mayorWorkplace: emptyMayorBuildingTarget("No City Hall selected"),
+  mayorHomeChoices: [],
+  mayorWorkplaceChoices: [],
+  mayorHomeChoicesLimited: false,
+  mayorWorkplaceChoicesLimited: false,
+  mayorSelectedBuilding: emptyMayorSelectedBuilding,
 };
 
 const panel$ = bindValue<ElectionPanel>(mod.id, "panel", defaultPanel);
@@ -367,6 +452,12 @@ function ElectionsMenuPanel(): ReactElement | null {
       tooltip: "Show the current mayor and mayoral actions.",
     },
     {
+      section: "residence",
+      label: "Mayor residence",
+      title: "Mayor residence",
+      tooltip: "Set the mayor's home and City Hall workplace from the selected building.",
+    },
+    {
       section: "schedule",
       label: "Election schedule",
       title: "Election schedule",
@@ -390,10 +481,12 @@ function ElectionsMenuPanel(): ReactElement | null {
     ? styles.subPanelWide
     : activeSection === "mayor"
       ? styles.subPanelMayor
+    : activeSection === "residence"
+      ? styles.subPanelMedium
     : activeSection === "schedule"
       ? styles.subPanelMedium
     : activeSection === "programs"
-      ? styles.subPanelMedium
+      ? styles.subPanelPrograms
       : styles.subPanelNarrow;
 
   return (
@@ -456,6 +549,17 @@ function PanelMenuIcon(props: { section: PanelSection }): ReactElement {
         <path d="M7 20h10" />
         <path d="M8 17h8l1-9-3 2.4L12 5l-2 5.4L7 8l1 9Z" />
         <path d="M9 13h6" />
+      </svg>
+    );
+  }
+
+  if (props.section === "residence") {
+    return (
+      <svg className={`${styles.sideMenuIcon} ${styles.sideMenuGlyphIcon}`} viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 11.5 12 5l8 6.5" />
+        <path d="M6.5 10.5V20h11V10.5" />
+        <path d="M10 20v-5h4v5" />
+        <path d="M9 8.5h6" />
       </svg>
     );
   }
@@ -527,6 +631,10 @@ function ActivePanelContent(props: {
     ) : (
       <div className={styles.notice}>No mayor has been selected yet.</div>
     );
+  }
+
+  if (activeSection === "residence") {
+    return <MayorResidenceSection panel={panel} />;
   }
 
   if (activeSection === "schedule") {
@@ -959,6 +1067,225 @@ function SupportProgramsPanel(props: { panel: ElectionPanel }): ReactElement {
   );
 }
 
+function MayorResidenceSection(props: { panel: ElectionPanel }): ReactElement {
+  const { panel } = props;
+  const home = panel.mayorHome ?? defaultPanel.mayorHome;
+  const workplace = panel.mayorWorkplace ?? defaultPanel.mayorWorkplace;
+  const homeChoices = Array.isArray(panel.mayorHomeChoices) ? panel.mayorHomeChoices : defaultPanel.mayorHomeChoices;
+  const workplaceChoices = Array.isArray(panel.mayorWorkplaceChoices) ? panel.mayorWorkplaceChoices : defaultPanel.mayorWorkplaceChoices;
+  const selected = panel.mayorSelectedBuilding ?? defaultPanel.mayorSelectedBuilding;
+
+  return (
+    <section className={styles.residenceCard}>
+      <div className={styles.sectionHeader}>
+        <Tooltip tooltip="The assigned residence and office are enforced for the current mayor. If the target is full, another resident or worker is removed first.">
+          <span>Mayor assignments</span>
+        </Tooltip>
+        <Tooltip tooltip={home.atTarget && workplace.atTarget ? "The mayor is assigned to both selected targets." : "The mayor will be moved to the selected targets during the next assignment update."}>
+          <strong>{home.atTarget && workplace.atTarget ? "Assigned" : "Relocating"}</strong>
+        </Tooltip>
+      </div>
+
+      <Tooltip tooltip={selected.exists ? "Currently selected game building." : "No building is selected in the game UI."}>
+        <div className={styles.selectedBuildingBox}>
+          <span>Selected building</span>
+          <strong>{selected.name}</strong>
+          {selected.exists && (
+            <div className={styles.selectedBuildingTags}>
+              <span className={selected.canBeHome ? styles.targetTagActive : styles.targetTagMuted}>Home</span>
+              <span className={selected.canBeWorkplace ? styles.targetTagActive : styles.targetTagMuted}>City Hall</span>
+            </div>
+          )}
+        </div>
+      </Tooltip>
+
+      <MayorTargetCard
+        kind="home"
+        title="Mayor home"
+        target={home}
+        choices={homeChoices}
+        choicesLimited={panel.mayorHomeChoicesLimited}
+        selected={selected}
+        canUseSelected={selected.canBeHome}
+        alreadySelected={selected.isHomeTarget}
+        choiceTrigger="setMayorHome"
+        focusTrigger="focusMayorHome"
+        useTrigger="useSelectedMayorHome"
+      />
+
+      <MayorTargetCard
+        kind="workplace"
+        title="Mayor workplace"
+        target={workplace}
+        choices={workplaceChoices}
+        choicesLimited={panel.mayorWorkplaceChoicesLimited}
+        selected={selected}
+        canUseSelected={selected.canBeWorkplace}
+        alreadySelected={selected.isWorkplaceTarget}
+        choiceTrigger="setMayorWorkplace"
+        focusTrigger="focusMayorWorkplace"
+        useTrigger="useSelectedMayorWorkplace"
+      />
+    </section>
+  );
+}
+
+function MayorTargetCard(props: {
+  kind: "home" | "workplace";
+  title: string;
+  target: MayorBuildingTarget;
+  choices: MayorBuildingChoice[];
+  choicesLimited: boolean;
+  selected: MayorSelectedBuilding;
+  canUseSelected: boolean;
+  alreadySelected: boolean;
+  choiceTrigger: string;
+  focusTrigger: string;
+  useTrigger: string;
+}): ReactElement {
+  const { kind, title, target, choices, choicesLimited, selected, canUseSelected, alreadySelected, choiceTrigger, focusTrigger, useTrigger } = props;
+  const status = target.atTarget
+    ? "Mayor assigned"
+    : target.exists
+      ? "Move pending"
+      : "No target";
+  const useDisabled = !selected.exists || !canUseSelected || alreadySelected;
+  const useTooltip = alreadySelected
+    ? "This building is already selected."
+    : canUseSelected
+      ? kind === "home"
+        ? "Assign the mayor's household to this low-density residence."
+        : "Assign the mayor to work at this City Hall."
+      : kind === "home"
+        ? "Selected building must be a low-density residential building."
+        : "Selected building must be a City Hall asset.";
+
+  return (
+    <article className={styles.residenceTargetCard}>
+      <div className={styles.residenceTargetHeader}>
+        <div className={styles.residenceTargetTitle}>
+          <Tooltip tooltip={kind === "home" ? "Saved mayor residence target." : "Saved mayor workplace target."}>
+            <span>{title}</span>
+          </Tooltip>
+          <Tooltip tooltip={target.entityLabel}>
+            <strong>{target.name}</strong>
+          </Tooltip>
+        </div>
+        <Tooltip tooltip={target.atTarget ? "The mayor is already assigned here." : "The assignment system will move the mayor here."}>
+          <span className={target.atTarget ? styles.targetTagActive : styles.targetTagPending}>{status}</span>
+        </Tooltip>
+      </div>
+
+      <MayorChoiceDropdown
+        kind={kind}
+        target={target}
+        choices={choices}
+        choicesLimited={choicesLimited}
+        choiceTrigger={choiceTrigger}
+      />
+
+      <div className={styles.residenceMetaGrid}>
+        <Info
+          label="Current"
+          value={target.currentExists ? target.currentName : "Unknown"}
+          tooltip={target.currentEntityLabel}
+        />
+      </div>
+
+      <div className={styles.residenceActionRow}>
+        <Tooltip tooltip={target.canFocus ? "Move the camera to the selected mayor target." : "No target is available to focus."}>
+          <Button
+            variant="flat"
+            className={target.canFocus ? styles.residenceActionButton : `${styles.residenceActionButton} ${styles.bribeButtonDisabled}`}
+            disabled={!target.canFocus}
+            aria-disabled={!target.canFocus}
+            onSelect={() => {
+              if (target.canFocus) {
+                trigger(mod.id, focusTrigger);
+              }
+            }}
+          >
+            <strong>Focus</strong>
+          </Button>
+        </Tooltip>
+        <Tooltip tooltip={useTooltip}>
+          <Button
+            variant="flat"
+            className={!useDisabled ? styles.residenceActionButton : `${styles.residenceActionButton} ${styles.bribeButtonDisabled}`}
+            disabled={useDisabled}
+            aria-disabled={useDisabled}
+            onSelect={() => {
+              if (!useDisabled) {
+                trigger(mod.id, useTrigger);
+              }
+            }}
+          >
+            <strong>{alreadySelected ? "Selected" : "Use selected"}</strong>
+          </Button>
+        </Tooltip>
+      </div>
+    </article>
+  );
+}
+
+function MayorChoiceDropdown(props: {
+  kind: "home" | "workplace";
+  target: MayorBuildingTarget;
+  choices: MayorBuildingChoice[];
+  choicesLimited: boolean;
+  choiceTrigger: string;
+}): ReactElement {
+  const { kind, target, choices, choicesLimited, choiceTrigger } = props;
+  const label = target.exists ? target.name : kind === "home" ? "Choose a residence" : "Choose a City Hall";
+  const emptyLabel = kind === "home"
+    ? "No low-density residences found"
+    : "No City Hall assets found";
+  const tooltip = kind === "home"
+    ? "Choose the low-density residential building where the mayor should live."
+    : "Choose the City Hall asset where the mayor should work.";
+
+  if (choices.length === 0) {
+    return (
+      <Tooltip tooltip={emptyLabel}>
+        <div className={styles.residenceDropdownUnavailable}>{emptyLabel}</div>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Dropdown
+      content={(
+        <div className={styles.residenceDropdownMenu}>
+          {choices.map((choice) => {
+            return (
+              <DropdownItem<number>
+                key={`${choice.entityIndex}:${choice.entityVersion}`}
+                value={choice.index}
+                selected={choice.selected}
+                className={`${styles.residenceDropdownItem} ${choice.selected ? styles.residenceDropdownItemSelected : ""}`}
+                onChange={() => {
+                  trigger(mod.id, choiceTrigger, choice.entityIndex, choice.entityVersion);
+                }}
+              >
+                <span className={styles.residenceDropdownItemText}>{choice.name}</span>
+              </DropdownItem>
+            );
+          })}
+          {choicesLimited && (
+            <div className={styles.residenceDropdownHint}>
+              More eligible buildings exist. Select one in the city to add it here.
+            </div>
+          )}
+        </div>
+      )}
+    >
+      <DropdownToggle className={styles.residenceDropdownToggle} tooltip={tooltip}>
+        <span>{label}</span>
+      </DropdownToggle>
+    </Dropdown>
+  );
+}
+
 function MayorSection(props: { panel: ElectionPanel }): ReactElement {
   const { panel } = props;
   const activeCandidateField = hasActiveCandidateField(panel);
@@ -1110,6 +1437,14 @@ function MayorSection(props: { panel: ElectionPanel }): ReactElement {
           </Tooltip>
         </div>
       </div>
+      {panel.mayorTagName && (
+        <Tooltip tooltip={panel.mayorTagDescription || panel.mayorTagName}>
+          <div className={`${styles.candidateTag} ${tagToneClass(panel.mayorTagTone)}`}>
+            <span>{panel.mayorTagName}</span>
+            <strong>{panel.mayorTagDescription}</strong>
+          </div>
+        </Tooltip>
+      )}
       <Tooltip tooltip="Current mayoral platform and city effect. Temporary transition mayors apply no city modifiers.">
         <div className={styles.mayorPlatform}>
           <span>{panel.mayorEffectName}</span>
@@ -1198,6 +1533,7 @@ function CandidateCard(props: {
   const canDonate = donationsOpen && candidate.exists;
   const tiers = Array.isArray(donationTiers) ? donationTiers : [];
   const donationTier = tiers[0];
+  const donationCost = candidate.donationCost || donationTier?.amount || 0;
 
   return (
     <article className={`${styles.candidateCard} ${candidate.index === 0 ? styles.candidateCardA : styles.candidateCardB}`}>
@@ -1232,9 +1568,18 @@ function CandidateCard(props: {
         </div>
       </div>
 
-      <Tooltip tooltip="Total city funds donated to this candidate during the current campaign.">
+      {candidate.tagName && (
+        <Tooltip tooltip={candidate.tagDescription || candidate.tagName}>
+          <div className={`${styles.candidateTag} ${tagToneClass(candidate.tagTone)}`}>
+            <span>{candidate.tagName}</span>
+            <strong>{candidate.tagDescription}</strong>
+          </div>
+        </Tooltip>
+      )}
+
+      <Tooltip tooltip="Effective campaign support credited to this candidate during the current campaign. Some tags can change cost or campaign effect.">
         <div className={styles.donationTotal}>
-          <span>Total donated</span>
+          <span>Total donations</span>
           <strong>{formatAmount(candidate.donationAmount)}</strong>
         </div>
       </Tooltip>
@@ -1254,7 +1599,7 @@ function CandidateCard(props: {
         </div>
         {donationTier && (
           <Tooltip
-            tooltip={`Donate ${formatAmount(donationTier.amount)} of city funds to support this candidate's campaign before election day.`}
+            tooltip={`Donate ${formatAmount(donationCost)} of city funds to support this candidate's campaign before election day.`}
           >
             <Button
               variant="flat"
@@ -1267,7 +1612,7 @@ function CandidateCard(props: {
                 }
               }}
             >
-              <strong>Donate {formatAmount(donationTier.amount)}</strong>
+              <strong>Donate {formatAmount(donationCost)}</strong>
             </Button>
           </Tooltip>
         )}
@@ -1296,6 +1641,22 @@ function PlatformImpactList(props: { impacts: PlatformImpact[] }): ReactElement 
       ))}
     </div>
   );
+}
+
+function tagToneClass(tone: string): string {
+  if (tone === "Advantage") {
+    return styles.candidateTagPositive;
+  }
+
+  if (tone === "Disadvantage") {
+    return styles.candidateTagNegative;
+  }
+
+  if (tone === "Mixed") {
+    return styles.candidateTagMixed;
+  }
+
+  return styles.candidateTagNeutral;
 }
 
 function PollRow(props: {
@@ -1357,6 +1718,22 @@ function normalizePanel(panel: ElectionPanel | undefined | null): ElectionPanel 
     poll,
     candidateA,
     candidateB,
+    mayorHome: {
+      ...defaultPanel.mayorHome,
+      ...(source.mayorHome ?? {}),
+    },
+    mayorWorkplace: {
+      ...defaultPanel.mayorWorkplace,
+      ...(source.mayorWorkplace ?? {}),
+    },
+    mayorHomeChoices: Array.isArray(source.mayorHomeChoices) ? source.mayorHomeChoices : [],
+    mayorWorkplaceChoices: Array.isArray(source.mayorWorkplaceChoices) ? source.mayorWorkplaceChoices : [],
+    mayorHomeChoicesLimited: !!source.mayorHomeChoicesLimited,
+    mayorWorkplaceChoicesLimited: !!source.mayorWorkplaceChoicesLimited,
+    mayorSelectedBuilding: {
+      ...defaultPanel.mayorSelectedBuilding,
+      ...(source.mayorSelectedBuilding ?? {}),
+    },
     donationTiers: Array.isArray(source.donationTiers) ? source.donationTiers : [],
     supportPrograms: Array.isArray(source.supportPrograms) ? source.supportPrograms : [],
     mayorPlatformImpacts: Array.isArray(source.mayorPlatformImpacts) ? source.mayorPlatformImpacts : [],

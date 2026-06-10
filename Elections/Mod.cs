@@ -5,6 +5,7 @@ using Game.Modding;
 using Game.SceneFlow;
 using Elections.Systems;
 using System.IO;
+using Unity.Entities;
 
 namespace Elections
 {
@@ -13,11 +14,17 @@ namespace Elections
         public const string Id = "Elections";
         public static ILog log = LogManager.GetLogger($"{nameof(Elections)}.{nameof(Mod)}").SetShowsErrorsInUI(false);
         public static Setting m_Setting;
+        public static string SettingsFolder = Path.Combine(UnityEngine.Application.persistentDataPath, "ModsSettings", nameof(Elections));
         public static string ModDirectory { get; private set; }
 
         public void OnLoad(UpdateSystem updateSystem)
         {
             log.Info(nameof(OnLoad));
+
+            if (!Directory.Exists(SettingsFolder))
+            {
+                Directory.CreateDirectory(SettingsFolder);
+            }
 
             if (GameManager.instance.modManager.TryGetExecutableAsset(this, out var asset))
             {
@@ -48,6 +55,10 @@ namespace Elections
         public void OnDispose()
         {
             log.Info(nameof(OnDispose));
+            World.DefaultGameObjectInjectionWorld
+                ?.GetExistingSystemManaged<MayorEffectSystem>()
+                ?.CleanupAppliedEffect();
+
             if (m_Setting != null)
             {
                 m_Setting.UnregisterInOptionsUI();

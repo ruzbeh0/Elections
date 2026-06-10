@@ -117,8 +117,11 @@ namespace Elections.Systems
                 0.12f);
 
             float endorsementInfluence = GetEndorsementInfluence(profile, state);
+            float candidateTagInfluence =
+                CandidateTagPreference(profile, state.candidateATagId) -
+                CandidateTagPreference(profile, state.candidateBTagId);
             float personalLean = StableVoterLean(voter) * 0.035f;
-            return math.clamp(0.5f + (scoreA - scoreB) * 0.09f + donationInfluence + endorsementInfluence + personalLean, 0.08f, 0.92f);
+            return math.clamp(0.5f + (scoreA - scoreB) * 0.09f + donationInfluence + endorsementInfluence + candidateTagInfluence + personalLean, 0.08f, 0.92f);
         }
 
         public static float GetVotingTurnoutMultiplier(Citizen citizen)
@@ -399,6 +402,19 @@ namespace Elections.Systems
             float happyTrust = math.saturate((profile.happiness - 55f) / 45f);
             float bonus = happyTrust * 0.05f;
             return endorsedIndex == 0 ? bonus : -bonus;
+        }
+
+        private static float CandidateTagPreference(VoterProfile profile, int tagId)
+        {
+            return ElectionCandidateTags.GetVoteProbabilityBonus(
+                tagId,
+                profile.age,
+                profile.education,
+                profile.wealth,
+                profile.happiness,
+                profile.worker,
+                profile.student,
+                profile.hasCar);
         }
 
         private static float ImpactPreference(VoterProfile profile, ElectionEffectImpact impact)

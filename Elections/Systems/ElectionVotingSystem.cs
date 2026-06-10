@@ -1,5 +1,6 @@
 using Elections.Bridge;
 using Elections.Components;
+using Elections.Models;
 using Game;
 using Game.Buildings;
 using Game.Citizens;
@@ -238,6 +239,7 @@ namespace Elections.Systems
                         GetEducationDailyTurnoutBonusPercent(state, data.GetEducationLevel()),
                         1,
                         100);
+                    dailyTurnout = ElectionCandidateTags.ApplyTurnoutModifier(dailyTurnout, state.candidateATagId, state.candidateBTagId);
                     float turnoutMultiplier = ElectionUtility.GetVotingTurnoutMultiplier(data);
                     if (state.strictVotingIdLawPassed &&
                         data.GetEducationLevel() <= 0 &&
@@ -314,8 +316,11 @@ namespace Elections.Systems
                 }
 
                 int chanceEligibleCount = math.max(0, eligibleCount - blockedByWorkCount - noAvailableWorkWindowCount);
-                float averageWeightedAvailableHours = chanceEligibleCount > 0 ? weightedAvailableHoursTotal / chanceEligibleCount : 0f;
-                ElectionDebug.Log($"Voting trip request update: date={ElectionUtility.FormatCurrentDate(World, now)} {now:HH:mm}, pollingPlaces={pollingPlaces.Count}, availableResidents={citizens.Length}, eligibleResidents={eligibleCount}, eligibleByAge=teen:{teenEligibleCount}/adult:{adultEligibleCount}/elderly:{elderlyEligibleCount}, dailyTurnoutByAge=teen:{teenDailyTurnout}/adult:{adultDailyTurnout}/elderly:{elderlyDailyTurnout}, dailyTurnoutBonusByEducation=uneducated:{state.uneducatedTurnoutBonusPercent}/poorlyEducated:{state.educatedTurnoutBonusPercent}, votingHours={votingHours:0.##}, weightedVotingHours={weightedVotingHours:0.##}, averageWeightedAvailableHours={averageWeightedAvailableHours:0.##}, votingHourChanceWeight={votingHourChanceWeight:0.###}, selectedByChance={randomSelectedCount}, alreadyTracked={alreadyTrackedCount}, blockedByWork={blockedByWorkCount}, workWindowAdjusted={adjustedWorkWindowCount}, noAvailableWorkWindow={noAvailableWorkWindowCount}, rejectedByBridge={rejectedByBridgeCount}, requestedThisUpdate={requestedCount}, totalRequests={state.voteRequests}, holidayMode={sundayMode}, visitDurationMinutes={kMinVotingVisitMinutes:0}-{kMaxVotingVisitMinutes:0}.");
+                if (ElectionDebug.Enabled)
+                {
+                    float averageWeightedAvailableHours = chanceEligibleCount > 0 ? weightedAvailableHoursTotal / chanceEligibleCount : 0f;
+                    ElectionDebug.Log($"Voting trip request update: date={ElectionUtility.FormatCurrentDate(World, now)} {now:HH:mm}, pollingPlaces={pollingPlaces.Count}, availableResidents={citizens.Length}, eligibleResidents={eligibleCount}, eligibleByAge=teen:{teenEligibleCount}/adult:{adultEligibleCount}/elderly:{elderlyEligibleCount}, dailyTurnoutByAge=teen:{teenDailyTurnout}/adult:{adultDailyTurnout}/elderly:{elderlyDailyTurnout}, dailyTurnoutBonusByEducation=uneducated:{state.uneducatedTurnoutBonusPercent}/poorlyEducated:{state.educatedTurnoutBonusPercent}, votingHours={votingHours:0.##}, weightedVotingHours={weightedVotingHours:0.##}, averageWeightedAvailableHours={averageWeightedAvailableHours:0.##}, votingHourChanceWeight={votingHourChanceWeight:0.###}, selectedByChance={randomSelectedCount}, alreadyTracked={alreadyTrackedCount}, blockedByWork={blockedByWorkCount}, workWindowAdjusted={adjustedWorkWindowCount}, noAvailableWorkWindow={noAvailableWorkWindowCount}, rejectedByBridge={rejectedByBridgeCount}, requestedThisUpdate={requestedCount}, totalRequests={state.voteRequests}, holidayMode={sundayMode}, visitDurationMinutes={kMinVotingVisitMinutes:0}-{kMaxVotingVisitMinutes:0}.");
+                }
             }
         }
 
@@ -598,7 +603,7 @@ namespace Elections.Systems
                 }
             }
 
-            if (activeTrips > 0 || arrivals > 0)
+            if (ElectionDebug.Enabled && (activeTrips > 0 || arrivals > 0))
                 ElectionDebug.Log($"Voting arrival update: date={ElectionUtility.FormatCurrentDate(World, now)} {now:HH:mm}, activeTrips={activeTrips}, arrivalsThisUpdate={arrivals}, alreadyRecordedVotes={alreadyRecordedVotes}, totalArrivals={state.voteArrivals}, votesA={state.votesA}, votesB={state.votesB}.");
         }
 

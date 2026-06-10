@@ -464,7 +464,9 @@ namespace Elections.Systems
             Entity candidate = candidateIndex == 0 ? state.candidateA : state.candidateB;
             string name = GetEntityName(candidate, candidateIndex == 0 ? "Candidate A" : "Candidate B");
 
-            int amount = tier.Amount;
+            int tagId = GetCandidateTagId(state, candidateIndex);
+            int amount = ElectionCandidateTags.GetDonationCost(tagId, tier.Amount);
+            int effectiveAmount = ElectionCandidateTags.GetDonationCredit(tagId, tier.Amount);
             if (!TrySpendCityMoney(amount))
             {
                 DebugLog($"Donation rejected: city could not spend {amount:n0} for {name}.");
@@ -473,15 +475,15 @@ namespace Elections.Systems
             }
 
             if (candidateIndex == 0)
-                state.donationA += amount;
+                state.donationA += effectiveAmount;
             else
-                state.donationB += amount;
+                state.donationB += effectiveAmount;
 
             int totalDonation = candidateIndex == 0 ? state.donationA : state.donationB;
             int portraitIndex = candidateIndex == 0 ? state.candidateAPortraitIndex : state.candidateBPortraitIndex;
             PlatformSofteningResult softening = TrySoftenCandidatePlatform(ref state, candidateIndex, totalDonation);
-            ScheduleCandidateDonationThankYouChirp(candidateIndex, candidate, name, portraitIndex, amount, totalDonation, softening);
-            DebugLog($"Donation accepted: candidateIndex={candidateIndex}, candidate={DescribeEntity(candidate, name)}, amount={amount:n0}, totalDonation={totalDonation:n0}, thank-you chirp due in 1 real-world minute.");
+            ScheduleCandidateDonationThankYouChirp(candidateIndex, candidate, name, portraitIndex, effectiveAmount, totalDonation, softening);
+            DebugLog($"Donation accepted: candidateIndex={candidateIndex}, candidate={DescribeEntity(candidate, name)}, cost={amount:n0}, effectiveAmount={effectiveAmount:n0}, tag={ElectionCandidateTags.Get(tagId).Name}, totalDonation={totalDonation:n0}, thank-you chirp due in 1 real-world minute.");
             EntityManager.SetComponentData(stateEntity, state);
         }
 
@@ -1193,6 +1195,10 @@ namespace Elections.Systems
                 appliedModifierType2 = -1,
                 campaignDonationAmount = ElectionDonationTiers.FixedDonationAmount,
                 campaignBribeAmount = BribeAmount,
+                candidateATagId = ElectionCandidateTags.None,
+                candidateBTagId = ElectionCandidateTags.None,
+                mayorTagId = ElectionCandidateTags.None,
+                outgoingMayorTagId = ElectionCandidateTags.None,
                 corruptionInvestigationMayor = Entity.Null,
                 mayorBribeRecipient = Entity.Null,
                 outgoingMayor = Entity.Null,
@@ -1242,6 +1248,7 @@ namespace Elections.Systems
 
             EnsureActiveElectionTiming(ref state);
             EnsureCampaignCosts(ref state);
+            EnsureCandidateTags(ref state);
             EnsureSupportProgramState(ref state);
 
             if (!HasMinimumPopulation("state preparation") &&
@@ -1353,7 +1360,13 @@ namespace Elections.Systems
 
         private static int GetCampaignBribeAmount(ElectionState state)
         {
-            return state.campaignBribeAmount > 0 ? state.campaignBribeAmount : BribeAmount;
+            return GetCampaignBribeAmount(state, state.mayorTagId);
+        }
+
+        private static int GetCampaignBribeAmount(ElectionState state, int mayorTagId)
+        {
+            int baseAmount = state.campaignBribeAmount > 0 ? state.campaignBribeAmount : BribeAmount;
+            return ElectionCandidateTags.GetMayorActionCost(mayorTagId, baseAmount);
         }
 
         private static int GetDonationSofteningThreshold(ElectionState state)
@@ -1368,6 +1381,20 @@ namespace Elections.Systems
 
             if (state.campaignBribeAmount <= 0)
                 state.campaignBribeAmount = BribeAmount;
+        }
+
+        private static void EnsureCandidateTags(ref ElectionState state)
+        {
+            state.candidateATagId = ElectionCandidateTags.NormalizeId(state.candidateATagId);
+            state.candidateBTagId = ElectionCandidateTags.NormalizeId(state.candidateBTagId);
+            state.mayorTagId = ElectionCandidateTags.NormalizeId(state.mayorTagId);
+            state.outgoingMayorTagId = ElectionCandidateTags.NormalizeId(state.outgoingMayorTagId);
+
+            if (state.candidateATagId != ElectionCandidateTags.None &&
+                state.candidateATagId == state.candidateBTagId)
+            {
+                state.candidateBTagId = ElectionCandidateTags.None;
+            }
         }
 
         private static void EnsureSupportProgramState(ref ElectionState state)
@@ -1600,6 +1627,7 @@ namespace Elections.Systems
         {
             state.outgoingMayor = Entity.Null;
             state.outgoingMayorBribeTotal = 0;
+            state.outgoingMayorTagId = ElectionCandidateTags.None;
         }
 
         private static void ResetSupportProgramState(ref ElectionState state)
@@ -1748,12 +1776,18 @@ namespace Elections.Systems
         private void ApplyCandidateReplacement(ref ElectionState state, DateTime now, int candidateIndex, Entity replacement)
         {
             DateTime utcNow = DateTime.UtcNow;
+            bool campaignHasTags =
+                state.candidateATagId != ElectionCandidateTags.None ||
+                state.candidateBTagId != ElectionCandidateTags.None;
 
             if (candidateIndex == 0)
             {
                 state.candidateA = replacement;
                 state.candidateAEffectId = PickDifferentEffect(replacement, now, 17017, state.candidateBEffectId);
                 CaptureCandidateProfile(replacement, out state.candidateAAge, out state.candidateAEducation, out state.candidateAWorkType, out state.candidateAWealth);
+                state.candidateATagId = campaignHasTags
+                    ? PickCandidateTag(replacement, state.candidateAAge, state.candidateAEducation, now, 17029, state.candidateBTagId)
+                    : ElectionCandidateTags.None;
                 state.candidateAPortraitIndex = PickDistinctPortraitIndex(
                     replacement,
                     17,
@@ -1776,6 +1810,9 @@ namespace Elections.Systems
                 state.candidateB = replacement;
                 state.candidateBEffectId = PickDifferentEffect(replacement, now, 79191, state.candidateAEffectId);
                 CaptureCandidateProfile(replacement, out state.candidateBAge, out state.candidateBEducation, out state.candidateBWorkType, out state.candidateBWealth);
+                state.candidateBTagId = campaignHasTags
+                    ? PickCandidateTag(replacement, state.candidateBAge, state.candidateBEducation, now, 79201, state.candidateATagId)
+                    : ElectionCandidateTags.None;
                 state.candidateBPortraitIndex = PickDistinctPortraitIndex(
                     replacement,
                     7919,
@@ -1886,6 +1923,7 @@ namespace Elections.Systems
             state.mayor = mayor;
             state.mayorEffectId = 0;
             state.mayorNegativeSoftened = false;
+            state.mayorTagId = ElectionCandidateTags.None;
             ElectionUtility.GetCurrentCalendarDate(World, now, out int year, out _, out _);
             state.mayorEffectTermYear = year;
             state.mayorMoneyApplied = false;
@@ -2042,6 +2080,8 @@ namespace Elections.Systems
             state.candidateBEffectId = PickDifferentEffect(candidateB, now, 7919, state.candidateAEffectId);
             CaptureCandidateProfile(candidateA, out state.candidateAAge, out state.candidateAEducation, out state.candidateAWorkType, out state.candidateAWealth);
             CaptureCandidateProfile(candidateB, out state.candidateBAge, out state.candidateBEducation, out state.candidateBWorkType, out state.candidateBWealth);
+            state.candidateATagId = PickCandidateTag(candidateA, state.candidateAAge, state.candidateAEducation, now, 2879, ElectionCandidateTags.None);
+            state.candidateBTagId = PickCandidateTag(candidateB, state.candidateBAge, state.candidateBEducation, now, 5393, state.candidateATagId);
             state.donationA = 0;
             state.donationB = 0;
             SetCampaignCostsFromMonthlyBalance(ref state);
@@ -2092,7 +2132,7 @@ namespace Elections.Systems
             string pollDate = ElectionUtility.FormatDate(state.pollYear, state.pollMonth, 1);
             string electionDate = ElectionUtility.FormatDate(state.electionYear, state.electionMonth, 1);
             m_LastInvalidCandidateReport = null;
-            DebugLog($"Campaign started: reason={reason}, date={ElectionUtility.FormatCurrentDate(World, now)}, accelerated={accelerated}, A={DescribeEntity(candidateA, "Candidate A")}, B={DescribeEntity(candidateB, "Candidate B")}, effects={state.candidateAEffectId}/{state.candidateBEffectId}, portraits={state.candidateAPortraitIndex}/{state.candidateBPortraitIndex}, donationAmount={state.campaignDonationAmount:n0}, bribeAmount={state.campaignBribeAmount:n0}, poll={pollDate}, election={electionDate}, state={DescribeState(state)}.");
+            DebugLog($"Campaign started: reason={reason}, date={ElectionUtility.FormatCurrentDate(World, now)}, accelerated={accelerated}, A={DescribeEntity(candidateA, "Candidate A")}, B={DescribeEntity(candidateB, "Candidate B")}, effects={state.candidateAEffectId}/{state.candidateBEffectId}, tags={ElectionCandidateTags.Get(state.candidateATagId).Name}/{ElectionCandidateTags.Get(state.candidateBTagId).Name}, portraits={state.candidateAPortraitIndex}/{state.candidateBPortraitIndex}, donationAmount={state.campaignDonationAmount:n0}, bribeAmount={state.campaignBribeAmount:n0}, poll={pollDate}, election={electionDate}, state={DescribeState(state)}.");
 
             PostElectionChirpWithCandidates(
                 $"The mayoral race has begun. The candidates are {{LINK_1}} and {{LINK_2}}. Poll: {pollDate}. Election: {electionDate}.",
@@ -3288,7 +3328,7 @@ namespace Elections.Systems
             if (state.outgoingMayorBribeTotal <= 0)
                 return 0;
 
-            int bribeAmount = GetCampaignBribeAmount(state);
+            int bribeAmount = GetCampaignBribeAmount(state, state.outgoingMayorTagId);
             if (bribeAmount <= 0)
                 return 1;
 
@@ -3464,6 +3504,7 @@ namespace Elections.Systems
             state.outgoingMayorBribeTotal = state.mayorBribeRecipient == previousMayor
                 ? state.mayorBribeTotal
                 : 0;
+            state.outgoingMayorTagId = state.mayorTagId;
             ResetMayorBribeTrackingState(ref state);
         }
 
@@ -3475,6 +3516,7 @@ namespace Elections.Systems
 
             Entity winner = winnerIndex == 0 ? state.candidateA : state.candidateB;
             int effectId = winnerIndex == 0 ? state.candidateAEffectId : state.candidateBEffectId;
+            int winnerTagId = winnerIndex == 0 ? state.candidateATagId : state.candidateBTagId;
             bool winnerNegativeSoftened = winnerIndex == 0 ? state.candidateANegativeSoftened : state.candidateBNegativeSoftened;
             string winnerName = GetEntityName(winner, winnerIndex == 0 ? "Candidate A" : "Candidate B");
             int population = GetPopulation();
@@ -3486,6 +3528,7 @@ namespace Elections.Systems
 
             state.mayor = winner;
             state.mayorEffectId = effectId;
+            state.mayorTagId = winnerTagId;
             state.mayorNegativeSoftened = winnerNegativeSoftened;
             ElectionUtility.GetCurrentCalendarDate(World, now, out int currentYear, out _, out _);
             state.mayorEffectTermYear = state.mayorTermYear != 0 ? state.mayorTermYear : currentYear;
@@ -3500,7 +3543,7 @@ namespace Elections.Systems
             state.victoryWinnerChirpUtcTicks = DateTime.UtcNow.AddMinutes(1).Ticks;
             state.victoryLoserChirpUtcTicks = DateTime.UtcNow.AddMinutes(2).Ticks;
             ResetBribeMeetingState(ref state, true);
-            DebugLog($"Election completed: date={ElectionUtility.FormatCurrentDate(World, now)}, winnerIndex={winnerIndex}, winner={DescribeEntity(winner, winnerName)}, previousMayor={FormatEntity(previousMayor)}, outgoingMayor={FormatEntity(state.outgoingMayor)}, outgoingMayorBribeTotal={state.outgoingMayorBribeTotal:n0}, votesA={state.votesA}, votesB={state.votesB}, voteRequests={state.voteRequests}, voteArrivals={state.voteArrivals}, population={population}, eligibleVoters={eligibleVoters}, turnoutPct={turnoutPct}, effectId={effectId}.");
+            DebugLog($"Election completed: date={ElectionUtility.FormatCurrentDate(World, now)}, winnerIndex={winnerIndex}, winner={DescribeEntity(winner, winnerName)}, previousMayor={FormatEntity(previousMayor)}, outgoingMayor={FormatEntity(state.outgoingMayor)}, outgoingMayorBribeTotal={state.outgoingMayorBribeTotal:n0}, votesA={state.votesA}, votesB={state.votesB}, voteRequests={state.voteRequests}, voteArrivals={state.voteArrivals}, population={population}, eligibleVoters={eligibleVoters}, turnoutPct={turnoutPct}, effectId={effectId}, tag={ElectionCandidateTags.Get(winnerTagId).Name}.");
 
             ElectionEffectDefinition effect = ElectionEffects.Get(effectId, winnerNegativeSoftened);
             Entity announcementVenue = IsValidVenue(state.victoryPartyVenue) ? state.victoryPartyVenue : Entity.Null;
@@ -4077,6 +4120,7 @@ namespace Elections.Systems
                 GetEducationDailyTurnoutBonusPercent(state, citizen.GetEducationLevel()),
                 1,
                 100);
+            dailyTurnout = ElectionCandidateTags.ApplyTurnoutModifier(dailyTurnout, state.candidateATagId, state.candidateBTagId);
             float weight = dailyTurnout * ElectionUtility.GetVotingTurnoutMultiplier(citizen);
             if (state.strictVotingIdLawPassed &&
                 citizen.GetEducationLevel() <= 0 &&
@@ -4291,6 +4335,18 @@ namespace Elections.Systems
             int workType = candidateA ? state.candidateAWorkType : state.candidateBWorkType;
             int wealth = candidateA ? state.candidateAWealth : state.candidateBWealth;
             return ElectionCandidateProfileUtility.BuildChirpIntro(EntityManager, candidate, age, education, workType, wealth);
+        }
+
+        private static int GetCandidateTagId(ElectionState state, int candidateIndex)
+        {
+            return candidateIndex == 0 ? state.candidateATagId : state.candidateBTagId;
+        }
+
+        private int PickCandidateTag(Entity candidate, int age, int education, DateTime now, int salt, int excludedTagId)
+        {
+            int value = math.abs(candidate.Index * 1741 + candidate.Version * 313 + now.Year * 19 + now.Month * 223 + now.Day * 29 + salt + (int)m_SimulationSystem.frameIndex);
+            Unity.Mathematics.Random random = Unity.Mathematics.Random.CreateFromIndex((uint)math.max(1, value));
+            return ElectionCandidateTags.PickRandomId(ref random, age, education, excludedTagId);
         }
 
         private int PickEffect(Entity candidate, DateTime now, int salt)
@@ -4556,7 +4612,7 @@ namespace Elections.Systems
         {
             return $"version={state.version}, initialized={state.initialized}, stage={state.stage}, accelerated={state.acceleratedCycle}, " +
                    $"selection={FormatMaybeDate(state.selectionYear, state.selectionMonth)}, poll={FormatMaybeDate(state.pollYear, state.pollMonth)}, election={FormatMaybeDate(state.electionYear, state.electionMonth)}, " +
-                   $"hasCandidates={state.HasCandidates}, donations={state.donationA:n0}/{state.donationB:n0}, pollVotes={state.pollVotesA}/{state.pollVotesB}/{state.pollUndecided}, votes={state.votesA}/{state.votesB}, mayor={FormatEntity(state.mayor)}";
+                   $"hasCandidates={state.HasCandidates}, tags={ElectionCandidateTags.Get(state.candidateATagId).Name}/{ElectionCandidateTags.Get(state.candidateBTagId).Name}, donations={state.donationA:n0}/{state.donationB:n0}, pollVotes={state.pollVotesA}/{state.pollVotesB}/{state.pollUndecided}, votes={state.votesA}/{state.votesB}, mayor={FormatEntity(state.mayor)}, mayorTag={ElectionCandidateTags.Get(state.mayorTagId).Name}";
         }
 
         private static string FormatMaybeDate(int year, int month)

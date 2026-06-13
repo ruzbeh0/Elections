@@ -40,7 +40,13 @@ namespace Elections.Systems
         private bool m_LoggedNoPollingPlaces;
         private int m_SocialVoteChirpDayKey;
         private int m_SocialVoteChirpCount;
-        private readonly List<Entity> m_PollingPlaces = new List<Entity>(64);
+        private readonly List<PollingPlaceInfo> m_PollingPlaces = new List<PollingPlaceInfo>(64);
+
+        private struct PollingPlaceInfo
+        {
+            public Entity entity;
+            public float3 position;
+        }
 
         public override int GetUpdateInterval(SystemUpdatePhase phase)
         {
@@ -139,6 +145,7 @@ namespace Elections.Systems
                 All = new[]
                 {
                     ComponentType.ReadOnly<Building>(),
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
                     componentType
                 },
                 None = new[]
@@ -158,12 +165,16 @@ namespace Elections.Systems
                 {
                     m_LoggedMissingRealisticTrips = true;
                     ElectionDebug.Log($"Voting trip request skipped at {ElectionUtility.FormatCurrentDate(World, now)} {now:HH:mm}: Realistic Trips bridge is unavailable.");
-                    CustomChirpsBridge.PostChirp("Election voting trips require Realistic Trips. No residents can be sent to polling places through the current bridge.", DepartmentAccountBridge.CensusBureau, Entity.Null, "Election Board");
+                    CustomChirpsBridge.PostChirp(
+                        L("Lifecycle.VotingTrips.MissingRealisticTrips", "Election voting trips require Realistic Trips. No residents can be sent to polling places through the current bridge."),
+                        DepartmentAccountBridge.CensusBureau,
+                        Entity.Null,
+                        L("Lifecycle.Department.ElectionBoard", "Election Board"));
                 }
                 return;
             }
 
-            List<Entity> pollingPlaces = GetPollingPlaces();
+            List<PollingPlaceInfo> pollingPlaces = GetPollingPlaces();
             if (pollingPlaces.Count == 0)
             {
                 if (!m_LoggedNoPollingPlaces)
@@ -240,14 +251,8 @@ namespace Elections.Systems
                         ElectionUtility.GetTargetedTurnoutBonusPercent(EntityManager, citizen, data, state),
                         1,
                         100);
-                    dailyTurnout = ElectionCandidateTags.ApplyTurnoutModifier(dailyTurnout, state.candidateATagId, state.candidateBTagId);
+                    dailyTurnout = ElectionCandidateTags.ApplyTurnoutModifier(dailyTurnout, state);
                     float turnoutMultiplier = ElectionUtility.GetVotingTurnoutMultiplier(data);
-                    if (state.strictVotingIdLawPassed &&
-                        data.GetEducationLevel() <= 0 &&
-                        EntityManager.HasComponent<Worker>(citizen))
-                    {
-                        turnoutMultiplier *= 1f - ElectionUtility.StrictVotingIdUneducatedWorkerTurnoutPenaltyPercent / 100f;
-                    }
 
                     int workStartMinute = 0;
                     int workEndMinute = 0;
@@ -320,7 +325,7 @@ namespace Elections.Systems
                 if (ElectionDebug.Enabled)
                 {
                     float averageWeightedAvailableHours = chanceEligibleCount > 0 ? weightedAvailableHoursTotal / chanceEligibleCount : 0f;
-                    ElectionDebug.Log($"Voting trip request update: date={ElectionUtility.FormatCurrentDate(World, now)} {now:HH:mm}, pollingPlaces={pollingPlaces.Count}, availableResidents={citizens.Length}, eligibleResidents={eligibleCount}, eligibleByAge=teen:{teenEligibleCount}/adult:{adultEligibleCount}/elderly:{elderlyEligibleCount}, dailyTurnoutByAge=teen:{teenDailyTurnout}/adult:{adultDailyTurnout}/elderly:{elderlyDailyTurnout}, dailyTurnoutBonusByEducation=uneducated:{state.uneducatedTurnoutBonusPercent}/poorlyEducated:{state.educatedTurnoutBonusPercent}, votingHours={votingHours:0.##}, weightedVotingHours={weightedVotingHours:0.##}, averageWeightedAvailableHours={averageWeightedAvailableHours:0.##}, votingHourChanceWeight={votingHourChanceWeight:0.###}, selectedByChance={randomSelectedCount}, alreadyTracked={alreadyTrackedCount}, blockedByWork={blockedByWorkCount}, workWindowAdjusted={adjustedWorkWindowCount}, noAvailableWorkWindow={noAvailableWorkWindowCount}, rejectedByBridge={rejectedByBridgeCount}, requestedThisUpdate={requestedCount}, totalRequests={state.voteRequests}, holidayMode={sundayMode}, visitDurationMinutes={kMinVotingVisitMinutes:0}-{kMaxVotingVisitMinutes:0}.");
+                    ElectionDebug.Log($"Voting trip request update: date={ElectionUtility.FormatCurrentDate(World, now)} {now:HH:mm}, pollingPlaces={pollingPlaces.Count}, availableResidents={citizens.Length}, eligibleResidents={eligibleCount}, eligibleByAge=teen:{teenEligibleCount}/adult:{adultEligibleCount}/elderly:{elderlyEligibleCount}, dailyTurnoutByAge=teen:{teenDailyTurnout}/adult:{adultDailyTurnout}/elderly:{elderlyDailyTurnout}, dailyTurnoutBonusByEducation=uneducated:{state.uneducatedTurnoutBonusPercent}/poorlyEducated:{state.educatedTurnoutBonusPercent}/educatedPlus:{state.civicForumTurnoutBonusPercent}, votingHours={votingHours:0.##}, weightedVotingHours={weightedVotingHours:0.##}, averageWeightedAvailableHours={averageWeightedAvailableHours:0.##}, votingHourChanceWeight={votingHourChanceWeight:0.###}, selectedByChance={randomSelectedCount}, alreadyTracked={alreadyTrackedCount}, blockedByWork={blockedByWorkCount}, workWindowAdjusted={adjustedWorkWindowCount}, noAvailableWorkWindow={noAvailableWorkWindowCount}, rejectedByBridge={rejectedByBridgeCount}, requestedThisUpdate={requestedCount}, totalRequests={state.voteRequests}, holidayMode={sundayMode}, visitDurationMinutes={kMinVotingVisitMinutes:0}-{kMaxVotingVisitMinutes:0}.");
                 }
             }
         }
@@ -487,11 +492,11 @@ namespace Elections.Systems
                 case 1:
                     return state.educatedTurnoutBonusPercent;
                 default:
-                    return 0;
+                    return state.civicForumTurnoutBonusPercent;
             }
         }
 
-        private bool TryPickPollingPlace(Entity citizen, CurrentBuilding currentBuilding, List<Entity> pollingPlaces, Unity.Mathematics.Random random, out Entity pollingPlace)
+        private bool TryPickPollingPlace(Entity citizen, CurrentBuilding currentBuilding, List<PollingPlaceInfo> pollingPlaces, Unity.Mathematics.Random random, out Entity pollingPlace)
         {
             pollingPlace = Entity.Null;
             if (pollingPlaces.Count == 0)
@@ -499,27 +504,25 @@ namespace Elections.Systems
 
             if (!TryGetVotingOrigin(citizen, currentBuilding, out float3 origin))
             {
-                pollingPlace = pollingPlaces[random.NextInt(pollingPlaces.Count)];
+                pollingPlace = pollingPlaces[random.NextInt(pollingPlaces.Count)].entity;
                 return true;
             }
 
             float bestDistance = float.MaxValue;
             for (int i = 0; i < pollingPlaces.Count; i++)
             {
-                Entity candidate = pollingPlaces[i];
-                if (!TryGetEntityPosition(candidate, out float3 position))
-                    continue;
+                PollingPlaceInfo candidate = pollingPlaces[i];
 
-                float distance = math.distancesq(origin, position);
+                float distance = math.distancesq(origin, candidate.position);
                 if (pollingPlace == Entity.Null || distance < bestDistance)
                 {
-                    pollingPlace = candidate;
+                    pollingPlace = candidate.entity;
                     bestDistance = distance;
                 }
             }
 
             if (pollingPlace == Entity.Null)
-                pollingPlace = pollingPlaces[random.NextInt(pollingPlaces.Count)];
+                pollingPlace = pollingPlaces[random.NextInt(pollingPlaces.Count)].entity;
 
             return pollingPlace != Entity.Null;
         }
@@ -578,22 +581,14 @@ namespace Elections.Systems
                     if (currentBuildings[i].m_CurrentBuilding != voteTrip.pollingPlace)
                         continue;
 
-                    float probabilityA = ElectionUtility.GetVoteProbabilityForA(EntityManager, entities[i], citizens[i], state);
                     Unity.Mathematics.Random random = CreateRandom(entities[i], state.electionDayKey, 65537 + state.voteArrivals);
                     Entity voter = entities[i];
                     Entity pollingPlace = voteTrip.pollingPlace;
-                    int chosenCandidate;
-                    if (random.NextFloat() < probabilityA)
-                    {
-                        state.votesA++;
-                        chosenCandidate = 0;
-                    }
-                    else
-                    {
-                        state.votesB++;
-                        chosenCandidate = 1;
-                    }
+                    int chosenCandidate = ElectionUtility.PickVoteCandidate(EntityManager, voter, citizens[i], state, random.NextFloat());
+                    if (!state.IsActiveCandidateIndex(chosenCandidate))
+                        continue;
 
+                    state.AddCandidateVote(chosenCandidate);
                     voteTrip.chosenCandidate = chosenCandidate;
                     voteTrip.voted = true;
                     state.voteArrivals++;
@@ -605,54 +600,63 @@ namespace Elections.Systems
             }
 
             if (ElectionDebug.Enabled && (activeTrips > 0 || arrivals > 0))
-                ElectionDebug.Log($"Voting arrival update: date={ElectionUtility.FormatCurrentDate(World, now)} {now:HH:mm}, activeTrips={activeTrips}, arrivalsThisUpdate={arrivals}, alreadyRecordedVotes={alreadyRecordedVotes}, totalArrivals={state.voteArrivals}, votesA={state.votesA}, votesB={state.votesB}.");
+                ElectionDebug.Log($"Voting arrival update: date={ElectionUtility.FormatCurrentDate(World, now)} {now:HH:mm}, activeTrips={activeTrips}, arrivalsThisUpdate={arrivals}, alreadyRecordedVotes={alreadyRecordedVotes}, totalArrivals={state.voteArrivals}, votes={FormatVoteTotals(state)}.");
         }
 
         private static bool HasRecordedVote(ElectionVoteTrip voteTrip)
         {
             return voteTrip.voted ||
                    voteTrip.chosenCandidate == 0 ||
-                   voteTrip.chosenCandidate == 1;
+                   voteTrip.chosenCandidate == 1 ||
+                   voteTrip.chosenCandidate == 2 ||
+                   voteTrip.chosenCandidate == 3;
         }
 
         private void PostCandidateVotedChirp(ref ElectionState state, Entity voter, Entity pollingPlace)
         {
-            bool candidateA = voter == state.candidateA;
-            bool candidateB = voter == state.candidateB;
-            if ((!candidateA && !candidateB) ||
-                (candidateA && state.candidateAVotedChirpSent) ||
-                (candidateB && state.candidateBVotedChirpSent))
+            int candidateIndex = -1;
+            int candidateCount = state.ActiveCandidateCount;
+            for (int i = 0; i < candidateCount; i++)
+            {
+                if (voter == state.GetCandidate(i))
+                {
+                    candidateIndex = i;
+                    break;
+                }
+            }
+
+            if (candidateIndex < 0 || state.GetCandidateVotedChirpSent(candidateIndex))
             {
                 return;
             }
 
-            int portraitIndex = candidateA ? state.candidateAPortraitIndex : state.candidateBPortraitIndex;
-            string fallbackName = candidateA ? "Candidate A" : "Candidate B";
-            string name = GetCitizenName(voter, fallbackName);
-            string locationName = GetBuildingName(pollingPlace, "my voting site");
+            int portraitIndex = state.GetCandidatePortraitIndex(candidateIndex);
+            string name = GetCandidateChirpName(voter);
+            string locationName = GetBuildingName(pollingPlace, L("Lifecycle.Name.MyVotingSite", "my voting site"));
             string portraitImageSource = CandidatePortraitCatalog.GetPortraitImageSource(EntityManager, voter, portraitIndex);
             string endTime = ElectionUtility.FormatHourText(state.votingEndMinute);
             bool hasPollingPlaceLink = IsValidChirpTarget(pollingPlace);
             string text = hasPollingPlaceLink
-                ? $"I just voted at {{LINK_2}}. Polls are open until {endTime}; please make sure your voice is counted."
-                : $"I just voted at {locationName}. Polls are open until {endTime}; please make sure your voice is counted.";
-            string fallbackText = $"I just voted at {locationName}. Polls are open until {endTime}; please make sure your voice is counted.";
+                ? LF("Lifecycle.Vote.IJustVoted", "I just voted at {0}. Polls are open until {1}; please make sure your voice is counted.", "{LINK_2}", endTime)
+                : LF("Lifecycle.Vote.IJustVoted", "I just voted at {0}. Polls are open until {1}; please make sure your voice is counted.", locationName, endTime);
+            string fallbackText = LF("Lifecycle.Vote.IJustVoted", "I just voted at {0}. Polls are open until {1}; please make sure your voice is counted.", locationName, endTime);
 
             bool posted = hasPollingPlaceLink &&
                 CustomChirpsBridge.PostLargeChirpFromEntityWithPortraitImage(text, voter, voter, pollingPlace, portraitImageSource, name);
             if (!posted && !CustomChirpsBridge.PostLargeChirpFromEntityWithPortraitImage(fallbackText, voter, voter, portraitImageSource, name))
                 CustomChirpsBridge.PostChirpFromEntity(fallbackText, voter, voter, name);
 
-            if (candidateA)
-                state.candidateAVotedChirpSent = true;
-            else
-                state.candidateBVotedChirpSent = true;
+            state.SetCandidateVotedChirpSent(candidateIndex, true);
         }
 
         private void TryQueueSocialVoteChirp(ElectionState state, Entity voter, Entity pollingPlace, int chosenCandidate, Unity.Mathematics.Random random)
         {
-            if (voter == state.candidateA || voter == state.candidateB)
-                return;
+            int candidateCount = state.ActiveCandidateCount;
+            for (int i = 0; i < candidateCount; i++)
+            {
+                if (voter == state.GetCandidate(i))
+                    return;
+            }
 
             if (m_SocialVoteChirpDayKey != state.electionDayKey)
             {
@@ -666,18 +670,35 @@ namespace Elections.Systems
                 return;
             }
 
-            Entity candidate = chosenCandidate == 0 ? state.candidateA : state.candidateB;
-            string candidateName = chosenCandidate == 0
-                ? GetCitizenName(candidate, "Candidate A")
-                : GetCitizenName(candidate, "Candidate B");
+            Entity candidate = state.GetCandidate(chosenCandidate);
+            string candidateName = GetCandidateChirpName(candidate);
 
             if (SocialTripsBridge.TryQueueElectionVoteChirp(voter, pollingPlace, candidate, candidateName, chosenCandidate, state.electionDayKey))
                 m_SocialVoteChirpCount++;
         }
 
+        private static string FormatVoteTotals(ElectionState state)
+        {
+            int candidateCount = state.ActiveCandidateCount;
+            string result = string.Empty;
+            for (int i = 0; i < candidateCount; i++)
+            {
+                if (i > 0)
+                    result += "/";
+                result += state.GetCandidateVotes(i).ToString();
+            }
+
+            return result;
+        }
+
         private string GetCitizenName(Entity citizen, string fallback)
         {
             return ElectionNameUtility.GetCitizenFullName(m_NameSystem, EntityManager, citizen, fallback);
+        }
+
+        private string GetCandidateChirpName(Entity candidate)
+        {
+            return GetCitizenName(candidate, L("Lifecycle.Name.Candidate", "the candidate"));
         }
 
         private string GetBuildingName(Entity building, string fallback)
@@ -714,6 +735,16 @@ namespace Elections.Systems
             return fallback;
         }
 
+        private static string L(string key, string fallback)
+        {
+            return ElectionLocalization.Translate(key, fallback);
+        }
+
+        private static string LF(string key, string fallback, params object[] args)
+        {
+            return ElectionLocalization.Format(key, fallback, args);
+        }
+
         private static string SanitizeName(string value, string fallback)
         {
             if (string.IsNullOrWhiteSpace(value))
@@ -731,7 +762,7 @@ namespace Elections.Systems
                    !EntityManager.HasComponent<Temp>(entity);
         }
 
-        private List<Entity> GetPollingPlaces()
+        private List<PollingPlaceInfo> GetPollingPlaces()
         {
             m_PollingPlaces.Clear();
             AddPollingPlaces(m_SchoolQuery, m_PollingPlaces);
@@ -741,12 +772,19 @@ namespace Elections.Systems
             return m_PollingPlaces;
         }
 
-        private static void AddPollingPlaces(EntityQuery query, List<Entity> pollingPlaces)
+        private static void AddPollingPlaces(EntityQuery query, List<PollingPlaceInfo> pollingPlaces)
         {
             using (NativeArray<Entity> entities = query.ToEntityArray(Allocator.Temp))
+            using (NativeArray<Game.Objects.Transform> transforms = query.ToComponentDataArray<Game.Objects.Transform>(Allocator.Temp))
             {
                 for (int i = 0; i < entities.Length; i++)
-                    pollingPlaces.Add(entities[i]);
+                {
+                    pollingPlaces.Add(new PollingPlaceInfo
+                    {
+                        entity = entities[i],
+                        position = transforms[i].m_Position
+                    });
+                }
             }
         }
 

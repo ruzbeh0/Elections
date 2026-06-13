@@ -66,7 +66,11 @@
 }
 
 .subPanelWide {
-  width: 460rem;
+  width: 760rem;
+}
+
+.subPanelPartiesEditing {
+  width: 1190rem;
 }
 
 .subPanelHeader {
@@ -473,6 +477,113 @@
   opacity: 0.45;
 }
 
+.legislationPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10rem;
+  padding: 10rem;
+  border-radius: 6rem;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.legislationList {
+  display: flex;
+  flex-direction: column;
+  gap: 8rem;
+}
+
+.legislationCard {
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 8rem;
+  padding: 8rem;
+  border: 1rem solid rgba(255, 255, 255, 0.1);
+  border-radius: 6rem;
+  background-color: rgba(0, 0, 0, 0.12);
+}
+
+.legislationCardActive {
+  border-color: rgba(98, 210, 111, 0.58);
+  box-shadow: inset 0 0 0 1rem rgba(98, 210, 111, 0.12);
+}
+
+.legislationInfo {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5rem;
+}
+
+.legislationTitle {
+  display: block;
+  color: var(--accentColorNormal);
+  font-size: var(--fontSizeM);
+  font-weight: 700;
+  line-height: 1.15;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.legislationDescription {
+  display: block;
+  margin-top: 2rem;
+  color: var(--menuText2Normal);
+  font-size: var(--fontSizeS);
+  line-height: 1.2;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.legislationMetaRow {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8rem;
+  color: var(--menuText2Normal);
+  font-size: var(--fontSizeS);
+  line-height: 1.15;
+}
+
+.legislationStatusActive,
+.legislationStatusInactive {
+  flex: 0 0 auto;
+  font-size: var(--fontSizeS);
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.legislationStatusActive {
+  color: #62d26f;
+}
+
+.legislationStatusInactive {
+  color: var(--menuText2Normal);
+}
+
+.legislationButton {
+  width: 116rem;
+  min-width: 116rem;
+  min-height: 34rem;
+  align-self: center;
+  padding: 4rem 6rem;
+  border-radius: 4rem;
+  font-size: var(--fontSizeS);
+}
+
+.legislationButton strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legislationButtonDisabled {
+  opacity: 0.45;
+}
+
 .residenceCard {
   min-width: 0;
   display: flex;
@@ -713,47 +824,61 @@
 }
 
 .candidateStack {
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 28rem;
+}
+
+.candidateRow {
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+}
+
+.candidateRow + .candidateRow {
+  margin-top: 14rem;
+}
+
+.candidateSlot {
+  width: 0;
+  min-width: 0;
+  flex: 1 1 0;
+  display: flex;
+}
+
+.candidateSlot + .candidateSlot {
+  margin-left: 14rem;
+}
+
+.candidateSlotEmpty {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .candidateCard {
+  width: 100%;
+  height: 351rem;
   min-width: 0;
-  flex: 1 1 0;
+  min-height: 351rem;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 8rem;
   padding: 8rem;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 2rem solid rgba(255, 255, 255, 0.1);
   border-radius: 6rem;
   background-color: rgba(255, 255, 255, 0.06);
 }
 
-.candidateCardA {
-  margin-right: 0;
-  border-color: rgba(177, 108, 255, 0.82);
-  box-shadow: inset 0 0 0 1rem rgba(177, 108, 255, 0.18);
-}
-
-.candidateCardB {
-  margin-left: 0;
-  border-color: rgba(98, 210, 111, 0.82);
-  box-shadow: inset 0 0 0 1rem rgba(98, 210, 111, 0.16);
-}
-
 .candidateStack .candidateCard {
-  flex: 0 0 auto;
-}
-
-.candidateStack .candidateCardA,
-.candidateStack .candidateCardB {
-  margin-left: 0;
-  margin-right: 0;
-}
-
-.candidateStack .candidateCardB {
-  margin-top: 8rem;
+  min-height: 351rem;
 }
 
 .candidateHeader {
@@ -810,6 +935,40 @@
   word-break: normal;
 }
 
+.candidatePartyLine {
+  min-width: 0;
+  min-height: 20rem;
+  display: flex;
+  align-items: center;
+  gap: 8rem;
+  color: var(--menuText2Normal);
+  font-size: var(--fontSizeS);
+  line-height: 1.1;
+}
+
+.candidatePartyLine span:nth-child(2) {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidatePartyLine strong {
+  flex: 0 0 auto;
+  color: var(--accentColorNormal);
+  font-size: var(--fontSizeS);
+}
+
+.partySwatchSmall {
+  width: 10rem;
+  height: 10rem;
+  flex: 0 0 10rem;
+  margin-right: 3rem;
+  border-radius: 2rem;
+  box-shadow: 0 0 0 1rem rgba(255, 255, 255, 0.3);
+}
+
 .candidateTag {
   min-width: 0;
   display: grid;
@@ -859,6 +1018,408 @@
 
 .candidateTagNeutral {
   background-color: rgba(255, 255, 255, 0.07);
+}
+
+.partyPanel {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16rem;
+  padding: 3rem 5rem 6rem;
+  box-sizing: border-box;
+}
+
+.partyPanelEditing {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 16rem;
+}
+
+.partyGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22rem;
+  row-gap: 22rem;
+  column-gap: 22rem;
+}
+
+.partyPanelEditing .partyGrid {
+  min-width: 0;
+  flex: 1 1 720rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.partyCard {
+  min-width: 0;
+  min-height: 197rem;
+  display: flex;
+  flex-direction: column;
+  gap: 5rem;
+  margin: 7rem;
+  padding: 8rem;
+  box-sizing: border-box;
+  border: 2rem solid rgba(255, 255, 255, 0.12);
+  border-radius: 6rem;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.partyCardHeader {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10rem;
+}
+
+.partyColorPickerFrame {
+  width: 54rem;
+  height: 30rem;
+  min-width: 54rem;
+  flex: 0 0 54rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  box-sizing: border-box;
+  border: 1rem solid rgba(255, 255, 255, 0.22);
+  border-radius: 5rem;
+  background-color: rgba(0, 0, 0, 0.16);
+  box-shadow: inset 0 0 0 1rem rgba(255, 255, 255, 0.08);
+}
+
+.partyColorField {
+  width: 46rem;
+  height: 22rem;
+}
+
+.partyColorFallbackInput {
+  width: 46rem;
+  height: 22rem;
+  min-width: 0;
+  padding: 2rem 3rem;
+  border: 0;
+  border-radius: 3rem;
+  background-color: rgba(0, 0, 0, 0.2);
+  color: var(--menuText1Normal);
+  font-family: monospace;
+  font-size: var(--fontSizeS);
+  line-height: 1.1;
+  box-sizing: border-box;
+}
+
+.partyTitleBlock {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.partyNameInput {
+  width: 100%;
+  min-width: 0;
+  height: 28rem;
+  padding: 4rem 7rem;
+  border: 1rem solid rgba(255, 255, 255, 0.16);
+  border-radius: 4rem;
+  background-color: rgba(0, 0, 0, 0.18);
+  color: var(--menuText1Normal);
+  font-size: var(--fontSizeS);
+  line-height: 1.1;
+  box-sizing: border-box;
+}
+
+.partySaveButton,
+.partyReplaceAllButton {
+  width: 70rem;
+  min-width: 70rem;
+  min-height: 26rem;
+  padding: 3rem 6rem;
+  border-radius: 4rem;
+  font-size: var(--fontSizeS);
+}
+
+.partyReplaceAllButton {
+  width: 112rem;
+  min-width: 112rem;
+  align-self: flex-end;
+}
+
+.partySaveButton strong,
+.partyReplaceAllButton strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.partySaveButtonDisabled {
+  opacity: 0.45;
+}
+
+.partyStatsLine {
+  min-width: 0;
+  min-height: 24rem;
+  display: flex;
+  align-items: center;
+  gap: 12rem;
+  padding: 3rem 7rem;
+  border-radius: 4rem;
+  background-color: rgba(0, 0, 0, 0.14);
+  color: var(--menuText2Normal);
+  font-size: var(--fontSizeS);
+  line-height: 1.1;
+}
+
+.partyStatsLine span {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-right: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.partyStatsLine span + span {
+  margin-left: 8rem;
+}
+
+.partyStatsLine strong {
+  color: var(--menuText1Normal);
+  font-weight: 700;
+}
+
+.partyTagList {
+  display: flex;
+  flex-direction: column;
+  gap: 4rem;
+}
+
+.partyTagRow {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7rem;
+}
+
+.partyTagBadge {
+  min-width: 0;
+  min-height: 24rem;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7rem;
+  padding: 4rem 7rem;
+  border-radius: 4rem;
+  background-color: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1rem rgba(255, 255, 255, 0.12);
+  box-sizing: border-box;
+}
+
+.partyTagBadge span {
+  min-width: 0;
+  color: #ffffff;
+  font-size: var(--fontSizeS);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.partyTagBadge strong {
+  flex: 0 0 auto;
+  color: var(--menuText1Normal);
+  font-size: var(--fontSizeS);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.partyTagEditorPanel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10rem;
+  padding: 10rem;
+  border: 1rem solid rgba(255, 255, 255, 0.18);
+  border-radius: 6rem;
+  background-color: rgba(0, 0, 0, 0.16);
+  box-shadow: inset 0 0 0 1rem rgba(255, 255, 255, 0.06);
+}
+
+.partyPanelEditing .partyTagEditorPanel {
+  width: 408rem;
+  min-width: 408rem;
+  max-height: calc(100vh - 190rem);
+  flex: 0 0 408rem;
+  overflow-y: auto;
+}
+
+.partyTagEditorHeader {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10rem;
+}
+
+.partyTagEditorHeader > div:first-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3rem;
+}
+
+.partyTagEditorHeader strong {
+  min-width: 0;
+  color: var(--menuText1Normal);
+  font-size: var(--fontSizeM);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.partyTagEditorHeader span {
+  color: var(--menuText2Normal);
+  font-size: var(--fontSizeS);
+  line-height: 1.15;
+}
+
+.partyTagEditorTotal {
+  min-width: 82rem;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6rem;
+  padding: 5rem 7rem;
+  border-radius: 4rem;
+  background-color: rgba(0, 0, 0, 0.18);
+}
+
+.partyTagEditorTotal span {
+  color: var(--menuText2Normal);
+  font-size: var(--fontSizeS);
+}
+
+.partyTagEditorTotal strong {
+  font-size: var(--fontSizeM);
+  font-weight: 700;
+}
+
+.partyTagEditorSelectedList {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7rem;
+}
+
+.partySelectedTagButton,
+.partySelectedTagPlaceholder,
+.partyTagOption {
+  min-width: 0;
+  min-height: 30rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7rem;
+  padding: 5rem 7rem;
+  border-radius: 4rem;
+  font-size: var(--fontSizeS);
+  box-sizing: border-box;
+}
+
+.partySelectedTagButton span,
+.partyTagOption span {
+  min-width: 0;
+  flex: 1 1 auto;
+  color: #ffffff;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.partySelectedTagButton strong,
+.partyTagOption strong {
+  flex: 0 0 auto;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.partySelectedTagPlaceholder {
+  justify-content: center;
+  border: 1rem dashed rgba(255, 255, 255, 0.18);
+  color: var(--menuText2Normal);
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.partyTagOptionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7rem;
+}
+
+.partyTagOption {
+  width: 100%;
+  min-height: 34rem;
+}
+
+.partyTagOptionSelected {
+  box-shadow: inset 0 0 0 2rem rgba(255, 255, 255, 0.72);
+}
+
+.partyTagOptionBlocked {
+  opacity: 0.44;
+}
+
+.partyTagValuePositive {
+  background-color: rgba(98, 210, 111, 0.16);
+  box-shadow: inset 0 0 0 1rem rgba(98, 210, 111, 0.34);
+}
+
+.partyTagValuePositive strong,
+.partyTagTotalPositive,
+.partyTagTotalBalanced {
+  color: #62d26f !important;
+  -webkit-text-fill-color: #62d26f;
+}
+
+.partyTagValueNegative {
+  background-color: rgba(255, 107, 107, 0.15);
+  box-shadow: inset 0 0 0 1rem rgba(255, 107, 107, 0.34);
+}
+
+.partyTagValueNegative strong,
+.partyTagTotalNegative {
+  color: #ff6b6b !important;
+  -webkit-text-fill-color: #ff6b6b;
+}
+
+.partyTagValueNeutral {
+  background-color: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1rem rgba(255, 255, 255, 0.14);
+}
+
+.partyTagEditorActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8rem;
+  padding-top: 2rem;
+}
+
+.partyTagEditorButton {
+  width: 84rem;
+  min-width: 84rem;
+  min-height: 30rem;
+  padding: 3rem 6rem;
+  border-radius: 4rem;
+  font-size: var(--fontSizeS);
+}
+
+.partyTagEditorButton strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .donationTotal {

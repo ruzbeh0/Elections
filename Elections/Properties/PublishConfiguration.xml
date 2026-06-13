@@ -42,7 +42,7 @@ Elections adds a mayoral election cycle to the city. Residents can become candid
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/elections-mod.1927087/" />
 	<!--Version of the mod-->
-	<ModVersion Value="0.2" />
+	<ModVersion Value="0.3" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.5.*" />
 	<!--Dependency for the mod, can be set multiple times-->
@@ -52,17 +52,15 @@ Elections adds a mayoral election cycle to the city. Residents can become candid
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
-* Added 10 additional candidate portraits.
-* Increased the mayor portrait size in the mayor panel to match candidate portraits.
-* Rebalanced civic turnout programs: teen programs now add +30% election turnout, adult programs remain +10%, and elderly programs now add +15%.
-* Renamed civic program copy from daily turnout to election turnout where players see accumulated support.
-* Updated voting-trip probability so the daily election chance is spread over each cim's available voting hours.
-* Reduced last-hour voting trip probability and increased the probability for the previous hour so fewer cims arrive too late while some late arrivals can still happen.
-* Changed final turnout reporting to use eligible voters instead of total population.
-* Improved election result chirps so each candidate link is used only once, leaving the celebration venue link available.
-* Added voting-site overlay size settings in the mod's menu.
-* Fixed bug that was preventing the mod's UI menu to be shown when the Universal Mod Menu was selected.
-* Relocated the mod's main UI location to the left corner of the screen when the mod button is in the top left.
+* Added configurable two to four candidate races and optional runoff elections.
+* Added optional political parties with editable names and colors, persistent reputation, win and term tracking, party tags, and party effects on voting behavior.
+* Added candidate traits that can affect voter support, donation costs, turnout, campaign effectiveness, mayor actions, and platform effects.
+* Added election legislation and expanded civic programs.
+* Expanded campaign actions with daily donation limits, mayor endorsements and bribe meetings, cash assistance, vote-count tampering, and improved corruption/scandal handling.
+* Reworked polling and results for multi-candidate races with larger poll samples, undecided handling, margin-of-error summaries, and age, education, and income breakdowns.
+* Rebuilt the Elections panel with clearer sections for schedule, voting sites, mayor residence/workplace, candidates, programs, legislation, parties, and richer tooltips/status messaging.
+* Improved voting-site overlays and election-day voting behavior with multi-candidate vote rings, party/candidate colors, election-day holiday scheduling, and better vote-trip timing.
+* Added more candidate portraits.
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
 	<ExternalLink Type="github" Url="https://github.com/ruzbeh0/Elections" />

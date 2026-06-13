@@ -39,10 +39,7 @@ namespace Elections
 
 
             AssetDatabase.global.LoadSettings(nameof(Elections), m_Setting, new Setting(this));
-            ElectionDebug.Log($"Settings loaded: EnableElections={m_Setting.EnableElections}, UseUniversalModMenu={m_Setting.UseUniversalModMenu}, PollSamplePercent={m_Setting.PollSamplePercent}, DailyTurnout=teen:{m_Setting.TeenDailyVotingTurnoutPercent}/adult:{m_Setting.AdultDailyVotingTurnoutPercent}/elderly:{m_Setting.ElderlyDailyVotingTurnoutPercent}.");
-            CandidatePortraitCatalog.WarmupCache();
-            ElectionDebug.Log("Candidate portrait cache warmed.");
-
+            ElectionDebug.Log($"Settings loaded: EnableElections={m_Setting.EnableElections}, UseUniversalModMenu={m_Setting.UseUniversalModMenu}, CandidateCount={m_Setting.CandidateCount}, EnableParties={m_Setting.EnableParties}, EnableRunoffVoting={m_Setting.EnableRunoffVoting}, DailyTurnout=teen:{m_Setting.TeenDailyVotingTurnoutPercent}/adult:{m_Setting.AdultDailyVotingTurnoutPercent}/elderly:{m_Setting.ElderlyDailyVotingTurnoutPercent}.");
             updateSystem.UpdateAt<ElectionLifecycleSystem>(SystemUpdatePhase.GameSimulation);
             updateSystem.UpdateAt<ElectionVotingSystem>(SystemUpdatePhase.GameSimulation);
             updateSystem.UpdateAt<MayorEffectSystem>(SystemUpdatePhase.GameSimulation);

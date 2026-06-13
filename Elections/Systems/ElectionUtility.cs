@@ -24,7 +24,9 @@ namespace Elections.Systems
         public const int DefaultTeenDailyVotingTurnoutPercent = 36;
         public const int DefaultAdultDailyVotingTurnoutPercent = 49;
         public const int DefaultElderlyDailyVotingTurnoutPercent = 58;
-        public const int StrictVotingIdUneducatedWorkerTurnoutPenaltyPercent = 20;
+        private const float VoteScoreSensitivity = 0.85f;
+        private const float CandidateAffinityContrastScale = 1.8f;
+        private const float IssueWeightContrastScale = 1.35f;
 
         private struct VoterProfile
         {
@@ -99,29 +101,76 @@ namespace Elections.Systems
 
         public static float GetVoteProbabilityForA(EntityManager entityManager, Entity voter, Citizen voterData, ElectionState state)
         {
+            return GetVoteProbabilityForCandidate(entityManager, voter, voterData, state, 0);
+        }
+
+        public static int PickVoteCandidate(EntityManager entityManager, Entity voter, Citizen voterData, ElectionState state, float randomValue)
+        {
+            int candidateCount = state.ActiveCandidateCount;
+            if (candidateCount <= 0)
+                return -1;
+
             VoterProfile profile = CreateVoterProfile(entityManager, voter, voterData);
-            ElectionEffectDefinition candidateAEffect = ElectionEffects.Get(state.candidateAEffectId, state.candidateANegativeSoftened, state.candidateATagId);
-            ElectionEffectDefinition candidateBEffect = ElectionEffects.Get(state.candidateBEffectId, state.candidateBNegativeSoftened, state.candidateBTagId);
+            float totalWeight = 0f;
+            float weightA = 0f;
+            float weightB = 0f;
+            float weightC = 0f;
+            float weightD = 0f;
 
-            float scoreA = CandidateAffinity(profile, state.candidateAAge, state.candidateAEducation, state.candidateAWorkType, state.candidateAWealth) +
-                           PlatformPreference(profile, candidateAEffect) +
-                           ContinuityPreference(profile, candidateAEffect, state);
-            float scoreB = CandidateAffinity(profile, state.candidateBAge, state.candidateBEducation, state.candidateBWorkType, state.candidateBWealth) +
-                           PlatformPreference(profile, candidateBEffect) +
-                           ContinuityPreference(profile, candidateBEffect, state);
+            for (int i = 0; i < candidateCount; i++)
+            {
+                float weight = GetCandidateVoteWeight(profile, voter, state, i);
+                totalWeight += weight;
+                switch (i)
+                {
+                    case 0:
+                        weightA = weight;
+                        break;
+                    case 1:
+                        weightB = weight;
+                        break;
+                    case 2:
+                        weightC = weight;
+                        break;
+                    case 3:
+                        weightD = weight;
+                        break;
+                }
+            }
 
-            float donationInfluence = math.clamp(
-                ElectionDonationTiers.GetBonusForAmount(state.donationA, state.campaignDonationAmount) -
-                ElectionDonationTiers.GetBonusForAmount(state.donationB, state.campaignDonationAmount),
-                -0.12f,
-                0.12f);
+            if (totalWeight <= 0f)
+                return 0;
 
-            float endorsementInfluence = GetEndorsementInfluence(profile, state);
-            float candidateTagInfluence =
-                CandidateTagPreference(profile, state.candidateATagId) -
-                CandidateTagPreference(profile, state.candidateBTagId);
-            float personalLean = StableVoterLean(voter) * 0.035f;
-            return math.clamp(0.5f + (scoreA - scoreB) * 0.09f + donationInfluence + endorsementInfluence + candidateTagInfluence + personalLean, 0.08f, 0.92f);
+            float threshold = math.saturate(randomValue) * totalWeight;
+            float cumulative = 0f;
+            for (int i = 0; i < candidateCount; i++)
+            {
+                cumulative += i == 0 ? weightA : i == 1 ? weightB : i == 2 ? weightC : weightD;
+                if (threshold <= cumulative)
+                    return i;
+            }
+
+            return candidateCount - 1;
+        }
+
+        public static float GetVoteProbabilityForCandidate(EntityManager entityManager, Entity voter, Citizen voterData, ElectionState state, int candidateIndex)
+        {
+            int candidateCount = state.ActiveCandidateCount;
+            if (candidateIndex < 0 || candidateIndex >= candidateCount)
+                return 0f;
+
+            VoterProfile profile = CreateVoterProfile(entityManager, voter, voterData);
+            float targetWeight = 0f;
+            float totalWeight = 0f;
+            for (int i = 0; i < candidateCount; i++)
+            {
+                float weight = GetCandidateVoteWeight(profile, voter, state, i);
+                if (i == candidateIndex)
+                    targetWeight = weight;
+                totalWeight += weight;
+            }
+
+            return totalWeight > 0f ? math.clamp(targetWeight / totalWeight, 0.02f, 0.98f) : 0f;
         }
 
         public static int GetTargetedTurnoutBonusPercent(EntityManager entityManager, Entity citizenEntity, Citizen citizen, ElectionState state)
@@ -136,7 +185,86 @@ namespace Elections.Systems
             if (IsTransitVoucherEligible(entityManager, citizenEntity, citizen))
                 bonus += state.transitVoucherTurnoutBonusPercent;
 
+            bonus += GetLegislationTurnoutBonusPercent(entityManager, citizenEntity, citizen, state);
+
             return bonus;
+        }
+
+        private static int GetLegislationTurnoutBonusPercent(EntityManager entityManager, Entity citizenEntity, Citizen citizen, ElectionState state)
+        {
+            int bonus = 0;
+            int education = citizen.GetEducationLevel();
+            int wealth = GetWealthBracket(entityManager, citizenEntity);
+            CitizenAge age = citizen.GetAge();
+            bool worker = entityManager.HasComponent<Worker>(citizenEntity);
+            bool student = entityManager.HasComponent<Student>(citizenEntity);
+            bool hasCar = entityManager.HasComponent<CarKeeper>(citizenEntity);
+
+            if (state.HasLegislation(ElectionLegislationType.VoterIdentification) &&
+                education <= 0 &&
+                worker)
+            {
+                bonus += ElectionLegislation.VoterIdentificationUneducatedWorkerDelta;
+            }
+
+            if (state.HasLegislation(ElectionLegislationType.PropertyOwnerBallotNotification))
+            {
+                if (wealth >= 3)
+                    bonus += ElectionLegislation.PropertyOwnerWealthyDelta;
+                if (hasCar)
+                    bonus += ElectionLegislation.PropertyOwnerCarDelta;
+                if (wealth <= 1)
+                    bonus += ElectionLegislation.PropertyOwnerLowIncomeDelta;
+            }
+
+            if (state.HasLegislation(ElectionLegislationType.YouthCivicRegistration))
+            {
+                if (age == CitizenAge.Teen)
+                    bonus += ElectionLegislation.YouthTeenDelta;
+                if (student)
+                    bonus += ElectionLegislation.YouthStudentDelta;
+                if (age == CitizenAge.Elderly)
+                    bonus += ElectionLegislation.YouthElderlyDelta;
+            }
+
+            if (state.HasLegislation(ElectionLegislationType.NeighborhoodAccessVoting))
+            {
+                if (wealth <= 1)
+                    bonus += ElectionLegislation.NeighborhoodLowIncomeDelta;
+                if (!hasCar)
+                    bonus += ElectionLegislation.NeighborhoodNoCarDelta;
+                if (wealth >= 3)
+                    bonus += ElectionLegislation.NeighborhoodWealthyDelta;
+            }
+
+            if (state.HasLegislation(ElectionLegislationType.ContinuityOfGovernance) &&
+                HasActiveIncumbentPartyCandidate(state))
+            {
+                int happiness = GetCitizenHappiness(citizen);
+                if (happiness >= 60)
+                    bonus += ElectionLegislation.ContinuityHappyDelta;
+                if (age == CitizenAge.Elderly)
+                    bonus += ElectionLegislation.ContinuityElderlyDelta;
+                if (happiness < 45)
+                    bonus += ElectionLegislation.ContinuityUnhappyDelta;
+            }
+
+            return bonus;
+        }
+
+        private static bool HasActiveIncumbentPartyCandidate(ElectionState state)
+        {
+            if (!ElectionState.IsPartyIndex(state.mayorPartyIndex))
+                return false;
+
+            int candidateCount = state.ActiveCandidateCount;
+            for (int i = 0; i < candidateCount; i++)
+            {
+                if (state.GetCandidatePartyIndex(i) == state.mayorPartyIndex)
+                    return true;
+            }
+
+            return false;
         }
 
         public static bool IsLowIncomeResident(EntityManager entityManager, Entity citizenEntity)
@@ -176,7 +304,46 @@ namespace Elections.Systems
             float donationGap = math.abs(
                 ElectionDonationTiers.GetBonusForAmount(state.donationA, state.campaignDonationAmount) -
                 ElectionDonationTiers.GetBonusForAmount(state.donationB, state.campaignDonationAmount));
-            return math.clamp(0.2f - margin * 0.55f - donationGap * 0.25f, 0.06f, 0.22f);
+            return math.clamp(0.2f - margin * 0.55f - donationGap * 0.25f, 0.06f, 0.22f) * 0.5f;
+        }
+
+        public static float GetUndecidedProbability(EntityManager entityManager, Entity voter, Citizen voterData, ElectionState state)
+        {
+            int candidateCount = state.ActiveCandidateCount;
+            if (candidateCount <= 0)
+                return 0.11f;
+
+            VoterProfile profile = CreateVoterProfile(entityManager, voter, voterData);
+            float totalWeight = 0f;
+            float topWeight = 0f;
+            float secondWeight = 0f;
+            float topDonationBonus = 0f;
+            float secondDonationBonus = 0f;
+            for (int i = 0; i < candidateCount; i++)
+            {
+                float weight = GetCandidateVoteWeight(profile, voter, state, i);
+                float donationBonus = ElectionDonationTiers.GetBonusForAmount(state.GetCandidateDonation(i), state.campaignDonationAmount);
+                totalWeight += weight;
+                if (weight > topWeight)
+                {
+                    secondWeight = topWeight;
+                    secondDonationBonus = topDonationBonus;
+                    topWeight = weight;
+                    topDonationBonus = donationBonus;
+                }
+                else if (weight > secondWeight)
+                {
+                    secondWeight = weight;
+                    secondDonationBonus = donationBonus;
+                }
+            }
+
+            if (totalWeight <= 0f)
+                return 0.11f;
+
+            float margin = (topWeight - secondWeight) / totalWeight;
+            float donationGap = math.abs(topDonationBonus - secondDonationBonus);
+            return math.clamp(0.22f - margin * 0.65f - donationGap * 0.25f, 0.06f, 0.24f) * 0.5f;
         }
 
         public static int DayKey(int year, int month, int day)
@@ -365,6 +532,11 @@ namespace Elections.Systems
             return 1f - math.saturate(distance / (float)math.max(1, maxDistance));
         }
 
+        private static float CenteredSimilarity(int a, int b, int maxDistance, float neutralSimilarity)
+        {
+            return (Similarity(a, b, maxDistance) - neutralSimilarity) * CandidateAffinityContrastScale;
+        }
+
         private static VoterProfile CreateVoterProfile(EntityManager entityManager, Entity voter, Citizen voterData)
         {
             CitizenAge age = voterData.GetAge();
@@ -391,10 +563,10 @@ namespace Elections.Systems
 
         private static float CandidateAffinity(VoterProfile profile, int candidateAge, int candidateEducation, int candidateWorkType, int candidateWealth)
         {
-            return Similarity(profile.age, candidateAge, 3) * 0.45f +
-                   Similarity(profile.education, candidateEducation, 4) * 0.4f +
-                   Similarity(profile.workType, candidateWorkType, 35) * 0.35f +
-                   Similarity(profile.wealth, candidateWealth, 4) * 0.3f;
+            return CenteredSimilarity(profile.age, candidateAge, 3, 0.55f) * 0.7f +
+                   CenteredSimilarity(profile.education, candidateEducation, 4, 0.55f) * 0.65f +
+                   CenteredSimilarity(profile.wealth, candidateWealth, 4, 0.55f) * 0.6f +
+                   CenteredSimilarity(profile.workType, candidateWorkType, 35, 0.5f) * 0.25f;
         }
 
         private static float PlatformPreference(VoterProfile profile, ElectionEffectDefinition effect)
@@ -409,7 +581,7 @@ namespace Elections.Systems
             if (state.mayorEffectId <= 0)
                 return 0f;
 
-            ElectionEffectDefinition mayorEffect = ElectionEffects.Get(state.mayorEffectId, state.mayorNegativeSoftened, state.mayorTagId);
+            ElectionEffectDefinition mayorEffect = GetMayorEffectDefinition(state);
             float similarity = 0f;
             if (effect.PositiveImpact.Key == mayorEffect.PositiveImpact.Key)
                 similarity += 0.5f;
@@ -420,24 +592,25 @@ namespace Elections.Systems
             return mood * (similarity - 0.35f) * 0.20f;
         }
 
-        private static float GetEndorsementInfluence(VoterProfile profile, ElectionState state)
+        private static float GetEndorsementInfluence(VoterProfile profile, ElectionState state, int candidateIndex)
         {
             int endorsedIndex = state.mayorEndorsementCandidateIndex;
-            if (endorsedIndex != 0 && endorsedIndex != 1)
+            if (endorsedIndex != candidateIndex)
                 return 0f;
 
-            Entity endorsedCandidate = endorsedIndex == 0 ? state.candidateA : state.candidateB;
+            Entity endorsedCandidate = state.GetCandidate(candidateIndex);
             if (endorsedCandidate == Entity.Null || state.mayorEndorsementCandidate != endorsedCandidate)
                 return 0f;
 
             float happyTrust = math.saturate((profile.happiness - 55f) / 45f);
-            float bonus = happyTrust * 0.05f;
-            return endorsedIndex == 0 ? bonus : -bonus;
+            return happyTrust * 0.05f;
         }
 
-        private static float CandidateTagPreference(VoterProfile profile, int tagId)
+        private static float CandidateTagVoteMultiplier(VoterProfile profile, ElectionState state, int candidateIndex)
         {
-            return ElectionCandidateTags.GetVoteProbabilityBonus(
+            int tagId = state.GetCandidateTagId(candidateIndex);
+            int multiplier = ElectionCandidateTags.GetCampaignVoteEffectMultiplier(state, candidateIndex, tagId);
+            float modifier = ElectionCandidateTags.GetVoteProbabilityBonus(
                 tagId,
                 profile.age,
                 profile.education,
@@ -445,7 +618,55 @@ namespace Elections.Systems
                 profile.happiness,
                 profile.worker,
                 profile.student,
-                profile.hasCar);
+                profile.hasCar) * multiplier;
+
+            return PercentModifierToVoteMultiplier(modifier);
+        }
+
+        private static float PartyVoteMultiplier(VoterProfile profile, ElectionState state, int candidateIndex)
+        {
+            if (!(Mod.m_Setting?.EnableParties ?? false))
+                return 1f;
+
+            int partyIndex = state.GetCandidatePartyIndex(candidateIndex);
+            if (!ElectionState.IsPartyIndex(partyIndex))
+                return 1f;
+
+            float modifier = ElectionPartyTags.GetReputationVoteBonus(state.GetPartyReputation(partyIndex));
+            bool isIncumbentParty = partyIndex == state.mayorPartyIndex;
+            bool hasWonBefore = state.GetPartyWins(partyIndex) > 0;
+            bool pollLeadOutsideMargin = CandidateLeadsReleasedPollOutsideMargin(state, candidateIndex);
+            bool transitVoucherActive = state.transitVoucherTurnoutBonusPercent > 0;
+
+            for (int slot = 0; slot < ElectionPartyTags.TagsPerParty; slot++)
+            {
+                modifier += ElectionPartyTags.GetVoteProbabilityBonus(
+                    state.GetPartyTagId(partyIndex, slot),
+                    profile.age,
+                    profile.education,
+                    profile.wealth,
+                    profile.happiness,
+                    profile.worker,
+                    profile.student,
+                    profile.hasCar,
+                    state.strictVotingIdLawPassed,
+                    transitVoucherActive,
+                    isIncumbentParty,
+                    hasWonBefore,
+                    pollLeadOutsideMargin);
+            }
+
+            return PercentModifierToVoteMultiplier(modifier);
+        }
+
+        private static float CampaignStandingVoteMultiplier(ElectionState state, int candidateIndex)
+        {
+            return PercentModifierToVoteMultiplier(state.GetCandidateSupportModifierPercent(candidateIndex) / 100f);
+        }
+
+        private static float PercentModifierToVoteMultiplier(float modifier)
+        {
+            return math.max(0.05f, 1f + modifier);
         }
 
         private static float ImpactPreference(VoterProfile profile, ElectionEffectImpact impact)
@@ -455,8 +676,13 @@ namespace Elections.Systems
 
             float direction = impact.Positive ? 1f : -1f;
             float magnitude = ImpactMagnitude(impact);
-            float issueWeight = IssueWeight(profile, impact.Key);
+            float issueWeight = ContrastIssueWeight(IssueWeight(profile, impact.Key));
             return direction * magnitude * issueWeight;
+        }
+
+        private static float ContrastIssueWeight(float weight)
+        {
+            return math.max(0.25f, 1f + (weight - 1f) * IssueWeightContrastScale);
         }
 
         private static float ImpactMagnitude(ElectionEffectImpact impact)
@@ -525,6 +751,90 @@ namespace Elections.Systems
         {
             uint mixed = Mix((uint)math.max(1, math.abs(voter.Index * 73856093 + voter.Version * 19349663)));
             return (mixed % 2001) / 1000f - 1f;
+        }
+
+        private static float StableVoterCandidateLean(Entity voter, int candidateIndex)
+        {
+            uint mixed = Mix((uint)math.max(1, math.abs(voter.Index * 73856093 + voter.Version * 19349663 + (candidateIndex + 1) * 83492791)));
+            return (mixed % 2001) / 1000f - 1f;
+        }
+
+        private static float GetCandidateVoteWeight(VoterProfile profile, Entity voter, ElectionState state, int candidateIndex)
+        {
+            ElectionEffectDefinition effect = GetCandidateEffectDefinition(state, candidateIndex);
+            float score =
+                CandidateAffinity(
+                    profile,
+                    state.GetCandidateAge(candidateIndex),
+                    state.GetCandidateEducation(candidateIndex),
+                    state.GetCandidateWorkType(candidateIndex),
+                    state.GetCandidateWealth(candidateIndex)) +
+                PlatformPreference(profile, effect) +
+                ContinuityPreference(profile, effect, state) +
+                GetEndorsementInfluence(profile, state, candidateIndex) +
+                StableVoterCandidateLean(voter, candidateIndex) * 0.035f;
+
+            float donationBonus = math.clamp(
+                ElectionDonationTiers.GetBonusForAmount(state.GetCandidateDonation(candidateIndex), state.campaignDonationAmount),
+                0f,
+                0.24f);
+            float baseWeight = math.exp(score * VoteScoreSensitivity + donationBonus * 2.5f);
+            float supportMultiplier =
+                CampaignStandingVoteMultiplier(state, candidateIndex) *
+                CandidateTagVoteMultiplier(profile, state, candidateIndex) *
+                PartyVoteMultiplier(profile, state, candidateIndex);
+
+            return math.max(0.01f, baseWeight * supportMultiplier);
+        }
+
+        private static ElectionEffectDefinition GetCandidateEffectDefinition(ElectionState state, int candidateIndex)
+        {
+            int tagId = state.GetCandidateTagId(candidateIndex);
+            float candidatePlatformScale = ElectionCandidateTags.GetPlatformEffectScale(tagId);
+            float positiveScale = candidatePlatformScale;
+            float negativeScale = (state.GetCandidateNegativeSoftened(candidateIndex) ? 0.5f : 1f) * candidatePlatformScale;
+            if (Mod.m_Setting?.EnableParties ?? false)
+            {
+                int partyIndex = state.GetCandidatePartyIndex(candidateIndex);
+                positiveScale *= ElectionPartyTags.GetPositivePlatformScale(state, partyIndex);
+                negativeScale *= ElectionPartyTags.GetNegativePlatformScale(state, partyIndex);
+            }
+
+            return ElectionEffects.Get(state.GetCandidateEffectId(candidateIndex), positiveScale, negativeScale);
+        }
+
+        private static ElectionEffectDefinition GetMayorEffectDefinition(ElectionState state)
+        {
+            int tagId = state.mayorTagId;
+            float candidatePlatformScale = ElectionCandidateTags.GetPlatformEffectScale(tagId);
+            float positiveScale = candidatePlatformScale;
+            float negativeScale = (state.mayorNegativeSoftened ? 0.5f : 1f) * candidatePlatformScale;
+            if (Mod.m_Setting?.EnableParties ?? false)
+            {
+                positiveScale *= ElectionPartyTags.GetPositivePlatformScale(state, state.mayorPartyIndex);
+                negativeScale *= ElectionPartyTags.GetNegativePlatformScale(state, state.mayorPartyIndex);
+            }
+
+            return ElectionEffects.Get(state.mayorEffectId, positiveScale, negativeScale);
+        }
+
+        private static bool CandidateLeadsReleasedPollOutsideMargin(ElectionState state, int candidateIndex)
+        {
+            if (state.stage != ElectionCampaignStage.PollReleased && state.stage != ElectionCampaignStage.Voting)
+                return false;
+
+            ElectionPollSummary summary = ElectionPollUtility.BuildSummary(
+                state.pollVotesA,
+                state.pollVotesB,
+                state.pollVotesC,
+                state.pollVotesD,
+                state.pollUndecided,
+                state.ActiveCandidateCount,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty);
+            return summary.LeaderIndex == candidateIndex && !summary.WithinMargin;
         }
 
         private static uint Mix(uint value)

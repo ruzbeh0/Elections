@@ -1,11 +1,37 @@
-import { type ModRegistrar } from "cs2/modding";
+import { type BalloonDirection, type Color, type FocusKey } from "cs2/bindings";
+import { type ModRegistrar, type ModuleRegistry } from "cs2/modding";
 import { bindValue, trigger, useValue } from "cs2/api";
 import { Button, Dropdown, DropdownItem, DropdownToggle, Icon, Tooltip } from "cs2/ui";
 import { type ReactElement, useEffect, useMemo, useState } from "react";
+import engine from "cohtml/cohtml";
 
 import icon from "images/elections.svg";
 import mod from "../mod.json";
 import styles from "./mods/ElectionsMenu.module.scss";
+
+const localePrefix = "Elections.";
+
+function t(key: string, fallback: string, args?: Record<string, string | number>): string {
+  const id = `${localePrefix}${key}`;
+  let value = fallback;
+
+  try {
+    const translated = engine.translate(id);
+    if (translated && translated !== id) {
+      value = translated;
+    }
+  } catch {
+    value = fallback;
+  }
+
+  if (args) {
+    Object.entries(args).forEach(([name, raw]) => {
+      value = value.replace(new RegExp(`\\{${name}\\}`, "g"), String(raw));
+    });
+  }
+
+  return value;
+}
 
 type DonationTier = {
   index: number;
@@ -27,6 +53,19 @@ type SupportProgram = {
   disabledReason: string;
 };
 
+type Legislation = {
+  index: number;
+  title: string;
+  description: string;
+  tooltip: string;
+  cost: number;
+  active: boolean;
+  passChancePercent: number;
+  canPass: boolean;
+  canRepeal: boolean;
+  disabledReason: string;
+};
+
 type PlatformImpact = {
   value: string;
   label: string;
@@ -37,6 +76,10 @@ type Candidate = {
   index: number;
   exists: boolean;
   name: string;
+  partyIndex: number;
+  partyName: string;
+  partyColor: string;
+  partyReputation: number;
   portrait: string;
   canFocus: boolean;
   bio: string;
@@ -52,19 +95,69 @@ type Candidate = {
   donated: boolean;
 };
 
+type PartyTag = {
+  slot: number;
+  id: number;
+  name: string;
+  description: string;
+  value: number;
+  tone: string;
+};
+
+type Party = {
+  index: number;
+  name: string;
+  color: string;
+  reputation: number;
+  consecutiveTerms: number;
+  wins: number;
+  lastTagReplacementYear: number;
+  canReplaceTag: boolean;
+  replacementDisabledReason: string;
+  tags: PartyTag[];
+};
+
+type ColorFieldProps = {
+  focusKey?: FocusKey;
+  disabled?: boolean;
+  value?: Color;
+  className?: string;
+  alpha?: boolean;
+  popupDirection?: BalloonDirection;
+  onChange?: (color: Color) => void;
+};
+
+type ColorFieldComponent = (props: ColorFieldProps) => ReactElement;
+
+const colorFieldPath = "game-ui/common/input/color-picker/color-field/color-field.tsx";
+let moduleRegistryForVanillaComponents: ModuleRegistry | undefined;
+let resolvedColorField: ColorFieldComponent | undefined;
+
+type PollCandidateResult = {
+  index: number;
+  name: string;
+  votes: number;
+  percent: number;
+};
+
 type PollResult = {
   sampleSize: number;
   votesA: number;
   votesB: number;
+  votesC: number;
+  votesD: number;
   undecided: number;
   percentA: number;
   percentB: number;
+  percentC: number;
+  percentD: number;
   percentUndecided: number;
   marginOfError: number;
   leaderIndex: number;
   withinMargin: boolean;
   resultLabel: string;
   resultDescription: string;
+  candidateResults: PollCandidateResult[];
 };
 
 type PollBreakdown = PollResult & {
@@ -114,6 +207,7 @@ type MayorSelectedBuilding = {
 
 type ElectionPanel = {
   enabled: boolean;
+  partiesEnabled: boolean;
   hasState: boolean;
   waitingForPopulation: boolean;
   currentPopulation: number;
@@ -123,8 +217,15 @@ type ElectionPanel = {
   stage: string;
   stageLabel: string;
   cycleLabel: string;
+  runoffEnabledForCycle: boolean;
+  runoffActive: boolean;
+  runoffOriginalCandidateCount: number;
+  pendingMayorName: string;
+  pendingMayorInaugurationDate: string;
   pollReleased: boolean;
   donationsOpen: boolean;
+  canDonate: boolean;
+  donationUsedToday: boolean;
   bribesOpen: boolean;
   canBribe: boolean;
   canEndorse: boolean;
@@ -133,9 +234,6 @@ type ElectionPanel = {
   canTamper: boolean;
   voteTamperingScheduled: boolean;
   voteTamperingCandidateIndex: number;
-  canProposeVotingId: boolean;
-  votingIdLawPassed: boolean;
-  votingIdProposalPending: boolean;
   bribeUsedToday: boolean;
   bribeBlocked: boolean;
   bribeMeetingPending: boolean;
@@ -146,6 +244,11 @@ type ElectionPanel = {
   supportProgramUsedTodayLabel: string;
   supportProgramCost: number;
   supportPrograms: SupportProgram[];
+  legislationOpen: boolean;
+  legislationActionUsedToday: boolean;
+  legislationCost: number;
+  legislationPassChancePercent: number;
+  legislation: Legislation[];
   pollDate: string;
   electionDate: string;
   votingStartTime: string;
@@ -153,9 +256,16 @@ type ElectionPanel = {
   resultsTime: string;
   poll: Poll;
   donationTiers: DonationTier[];
+  candidates: Candidate[];
   candidateA: Candidate;
   candidateB: Candidate;
+  parties: Party[];
+  partyTags: PartyTag[];
   mayorName: string;
+  mayorPartyIndex: number;
+  mayorPartyName: string;
+  mayorPartyColor: string;
+  mayorPartyReputation: number;
   mayorPortrait: string;
   mayorCanFocus: boolean;
   mayorEffectName: string;
@@ -174,9 +284,9 @@ type ElectionPanel = {
   mayorSelectedBuilding: MayorSelectedBuilding;
 };
 
-type PanelSection = "votingSites" | "mayor" | "residence" | "schedule" | "programs" | "candidates";
+type PanelSection = "votingSites" | "mayor" | "residence" | "schedule" | "programs" | "legislation" | "candidates" | "parties";
 type CandidateTargetActionKind = "bribe" | "endorse" | "tamper";
-type MayorActionKind = CandidateTargetActionKind | "cashAssistance" | "votingId";
+type MayorActionKind = CandidateTargetActionKind | "cashAssistance";
 type MayorCampaignAction = {
   kind: MayorActionKind;
   title: string;
@@ -192,19 +302,45 @@ const emptyCandidate = (index: number, name: string): Candidate => ({
   index,
   exists: false,
   name,
+  partyIndex: -1,
+  partyName: "",
+  partyColor: "",
+  partyReputation: 0,
   portrait: "",
   canFocus: false,
   bio: "",
   tagName: "",
   tagDescription: "",
   tagTone: "Neutral",
-  effectName: "No platform",
-  effectDescription: "No candidate has been selected yet.",
+  effectName: t("Panel.Candidate.NoPlatform", "No platform"),
+  effectDescription: t("Panel.Candidate.EmptyDescription", "No candidate has been selected yet."),
   platformImpacts: [],
   donationAmount: 0,
   donationCost: 0,
   donationBonusPercent: 0,
   donated: false,
+});
+
+const emptyPartyTag = (slot = -1): PartyTag => ({
+  slot,
+  id: 0,
+  name: "",
+  description: "",
+  value: 0,
+  tone: "Neutral",
+});
+
+const emptyParty = (index: number): Party => ({
+  index,
+  name: t("UI.Party.FallbackNumber", "Party {number}", { number: index + 1 }),
+  color: "",
+  reputation: 50,
+  consecutiveTerms: 0,
+  wins: 0,
+  lastTagReplacementYear: 0,
+  canReplaceTag: false,
+  replacementDisabledReason: "",
+  tags: [],
 });
 
 const emptyMayorBuildingTarget = (name: string): MayorBuildingTarget => ({
@@ -213,7 +349,7 @@ const emptyMayorBuildingTarget = (name: string): MayorBuildingTarget => ({
   entityLabel: "Entity.Null",
   capacity: 0,
   occupants: 0,
-  currentName: "Unknown",
+  currentName: t("UI.Unknown", "Unknown"),
   currentEntityLabel: "Entity.Null",
   currentExists: false,
   atTarget: false,
@@ -222,7 +358,7 @@ const emptyMayorBuildingTarget = (name: string): MayorBuildingTarget => ({
 
 const emptyMayorSelectedBuilding: MayorSelectedBuilding = {
   exists: false,
-  name: "No building selected",
+  name: t("Panel.Mayor.NoBuilding", "No building selected"),
   entityLabel: "Entity.Null",
   canBeHome: false,
   canBeWorkplace: false,
@@ -232,17 +368,25 @@ const emptyMayorSelectedBuilding: MayorSelectedBuilding = {
 
 const defaultPanel: ElectionPanel = {
   enabled: true,
+  partiesEnabled: false,
   hasState: false,
   waitingForPopulation: false,
   currentPopulation: 0,
-  minimumPopulation: 1000,
+  minimumPopulation: 1500,
   populationReady: true,
   currentDate: "",
   stage: "None",
-  stageLabel: "No election data",
-  cycleLabel: "The election system has not initialized yet.",
+  stageLabel: t("Panel.Stage.NoElectionData", "No election data"),
+  cycleLabel: t("Panel.Cycle.NotInitialized", "The election system has not initialized yet."),
+  runoffEnabledForCycle: false,
+  runoffActive: false,
+  runoffOriginalCandidateCount: 0,
+  pendingMayorName: "",
+  pendingMayorInaugurationDate: "",
   pollReleased: false,
   donationsOpen: false,
+  canDonate: false,
+  donationUsedToday: false,
   bribesOpen: false,
   canBribe: false,
   canEndorse: false,
@@ -251,9 +395,6 @@ const defaultPanel: ElectionPanel = {
   canTamper: false,
   voteTamperingScheduled: false,
   voteTamperingCandidateIndex: -1,
-  canProposeVotingId: false,
-  votingIdLawPassed: false,
-  votingIdProposalPending: false,
   bribeUsedToday: false,
   bribeBlocked: false,
   bribeMeetingPending: false,
@@ -264,6 +405,11 @@ const defaultPanel: ElectionPanel = {
   supportProgramUsedTodayLabel: "",
   supportProgramCost: 500000,
   supportPrograms: [],
+  legislationOpen: false,
+  legislationActionUsedToday: false,
+  legislationCost: 2500000,
+  legislationPassChancePercent: 50,
+  legislation: [],
   pollDate: "",
   electionDate: "",
   votingStartTime: "08:00",
@@ -273,23 +419,35 @@ const defaultPanel: ElectionPanel = {
     sampleSize: 0,
     votesA: 0,
     votesB: 0,
+    votesC: 0,
+    votesD: 0,
     undecided: 0,
     percentA: 0,
     percentB: 0,
+    percentC: 0,
+    percentD: 0,
     percentUndecided: 0,
     marginOfError: 0,
     leaderIndex: -1,
     withinMargin: false,
     resultLabel: "",
     resultDescription: "",
+    candidateResults: [],
     ageGroups: [],
     educationGroups: [],
     incomeGroups: [],
   },
   donationTiers: [],
-  candidateA: emptyCandidate(0, "Candidate A"),
-  candidateB: emptyCandidate(1, "Candidate B"),
+  candidates: [],
+  candidateA: emptyCandidate(0, getCandidateFallbackName(0)),
+  candidateB: emptyCandidate(1, getCandidateFallbackName(1)),
+  parties: [],
+  partyTags: [],
   mayorName: "",
+  mayorPartyIndex: -1,
+  mayorPartyName: "",
+  mayorPartyColor: "",
+  mayorPartyReputation: 0,
   mayorPortrait: "",
   mayorCanFocus: false,
   mayorEffectName: "",
@@ -299,8 +457,8 @@ const defaultPanel: ElectionPanel = {
   mayorTagTone: "Neutral",
   mayorPlatformImpacts: [],
   mayorTemporary: false,
-  mayorHome: emptyMayorBuildingTarget("No low-density residence selected"),
-  mayorWorkplace: emptyMayorBuildingTarget("No City Hall selected"),
+  mayorHome: emptyMayorBuildingTarget(t("Panel.Mayor.NoHome", "No low-density residence selected")),
+  mayorWorkplace: emptyMayorBuildingTarget(t("Panel.Mayor.NoWorkplace", "No City Hall selected")),
   mayorHomeChoices: [],
   mayorWorkplaceChoices: [],
   mayorHomeChoicesLimited: false,
@@ -320,8 +478,13 @@ const showVotingLocations$ = bindValue<boolean>(
   false
 );
 
-const candidateAColor = "#b16cff";
-const candidateBColor = "#62d26f";
+const candidateColors = ["#b16cff", "#62d26f", "#d8a720", "#ff6fb3"];
+const candidateShadowColors = [
+  "rgba(177, 108, 255, 0.18)",
+  "rgba(98, 210, 111, 0.16)",
+  "rgba(216, 167, 32, 0.18)",
+  "rgba(255, 111, 179, 0.18)",
+];
 const undecidedColor = "#aeb8c8";
 
 type ElectionsMenuState = {
@@ -366,14 +529,163 @@ function useElectionsMenuState(): ElectionsMenuState {
 }
 
 function hasActiveCandidateField(panel: ElectionPanel): boolean {
+  const candidates = getActiveCandidates(panel);
   return panel.enabled &&
     !panel.waitingForPopulation &&
-    panel.candidateA?.exists &&
-    panel.candidateB?.exists &&
+    candidates.length >= 2 &&
     (panel.stage === "CandidatesSelected" || panel.stage === "PollReleased" || panel.stage === "Voting");
 }
 
+function getCandidateFallbackName(index: number): string {
+  switch (index) {
+    case 0:
+      return t("Panel.Candidate.Fallback.0", "Candidate A");
+    case 1:
+      return t("Panel.Candidate.Fallback.1", "Candidate B");
+    case 2:
+      return t("Panel.Candidate.Fallback.2", "Candidate C");
+    case 3:
+      return t("Panel.Candidate.Fallback.3", "Candidate D");
+    default:
+      return t("Panel.Candidate.Fallback.Generic", "Candidate");
+  }
+}
+
+function normalizeCandidate(candidate: Partial<Candidate> | undefined | null, index: number): Candidate {
+  const rawIndex = candidate?.index;
+  const candidateIndex = typeof rawIndex === "number" ? rawIndex : index;
+  const rawPlatformImpacts = candidate?.platformImpacts;
+  const platformImpacts = Array.isArray(rawPlatformImpacts) ? rawPlatformImpacts : [];
+  return {
+    ...emptyCandidate(candidateIndex, getCandidateFallbackName(candidateIndex)),
+    ...(candidate ?? {}),
+    index: candidateIndex,
+    platformImpacts,
+  };
+}
+
+function normalizePartyTag(tag: Partial<PartyTag> | undefined | null, slot: number): PartyTag {
+  return {
+    ...emptyPartyTag(slot),
+    ...(tag ?? {}),
+    slot: typeof tag?.slot === "number" ? tag.slot : slot,
+  };
+}
+
+function normalizeParty(party: Partial<Party> | undefined | null, index: number): Party {
+  const rawTags = party?.tags;
+  return {
+    ...emptyParty(index),
+    ...(party ?? {}),
+    index: typeof party?.index === "number" ? party.index : index,
+    tags: Array.isArray(rawTags) ? rawTags.map((tag, slot) => normalizePartyTag(tag, slot)) : [],
+  };
+}
+
+function getActiveCandidates(panel: ElectionPanel): Candidate[] {
+  const listedCandidates = Array.isArray(panel.candidates)
+    ? panel.candidates.map((candidate, index) => normalizeCandidate(candidate, index))
+    : [];
+
+  if (listedCandidates.some((candidate) => candidate.exists)) {
+    return listedCandidates.filter((candidate) => candidate.exists);
+  }
+
+  return [
+    normalizeCandidate(panel.candidateA, 0),
+    normalizeCandidate(panel.candidateB, 1),
+  ].filter((candidate) => candidate.exists);
+}
+
+function getCandidateRows(candidates: Candidate[], rowSize: number): Candidate[][] {
+  const rows: Candidate[][] = [];
+  const safeRowSize = Math.max(1, rowSize);
+
+  for (let index = 0; index < candidates.length; index += safeRowSize) {
+    rows.push(candidates.slice(index, index + safeRowSize));
+  }
+
+  return rows;
+}
+
+function getCandidateNameByIndex(candidates: Candidate[], index: number): string {
+  return candidates.find((candidate) => candidate.index === index)?.name || t("UI.Candidate.GenericArticle", "a candidate");
+}
+
+function getCandidateColor(index: number): string {
+  return candidateColors[Math.abs(index) % candidateColors.length];
+}
+
+function getCandidateDisplayColor(candidate: Candidate): string {
+  return normalizeHexColor(candidate.partyColor) || getCandidateColor(candidate.index);
+}
+
+function getCandidateBorderColor(candidate: Candidate): string {
+  return getCandidateDisplayColor(candidate);
+}
+
+function getCandidateShadowColor(candidate: Candidate): string {
+  return hexToRgba(getCandidateDisplayColor(candidate), 0.18) || candidateShadowColors[Math.abs(candidate.index) % candidateShadowColors.length];
+}
+
+function normalizeHexColor(color: string | undefined | null): string {
+  const raw = (color ?? "").trim();
+  const match = raw.match(/^#?[0-9a-fA-F]{6}$/);
+  if (!match) {
+    return "";
+  }
+
+  const value = raw.startsWith("#") ? raw.slice(1) : raw;
+  return `#${value.toUpperCase()}`;
+}
+
+function hexToRgba(color: string, alpha: number): string {
+  const normalized = normalizeHexColor(color);
+  if (!normalized) {
+    return "";
+  }
+
+  const value = normalized.slice(1);
+  const red = Number.parseInt(value.slice(0, 2), 16);
+  const green = Number.parseInt(value.slice(2, 4), 16);
+  const blue = Number.parseInt(value.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${Math.max(0, Math.min(1, alpha))})`;
+}
+
+function hexToColor(color: string): Color {
+  const normalized = normalizeHexColor(color) || candidateColors[0];
+  const value = normalized.slice(1);
+  return {
+    r: Number.parseInt(value.slice(0, 2), 16) / 255,
+    g: Number.parseInt(value.slice(2, 4), 16) / 255,
+    b: Number.parseInt(value.slice(4, 6), 16) / 255,
+    a: 1,
+  };
+}
+
+function colorToHex(color: Color | undefined | null): string {
+  const toHex = (value: number | undefined) => {
+    const channel = Number.isFinite(value) ? value as number : 0;
+    return Math.round(Math.max(0, Math.min(1, channel)) * 255)
+      .toString(16)
+      .padStart(2, "0");
+  };
+
+  return `#${toHex(color?.r)}${toHex(color?.g)}${toHex(color?.b)}`.toUpperCase();
+}
+
+function resolveVanillaColorField(moduleRegistry?: ModuleRegistry): ColorFieldComponent | undefined {
+  if (!resolvedColorField) {
+    const registry = moduleRegistry ?? moduleRegistryForVanillaComponents;
+    resolvedColorField = registry?.registry.get(colorFieldPath)?.ColorField as ColorFieldComponent | undefined;
+  }
+
+  return resolvedColorField;
+}
+
 export const register: ModRegistrar = (moduleRegistry) => {
+  moduleRegistryForVanillaComponents = moduleRegistry;
+  resolveVanillaColorField(moduleRegistry);
   moduleRegistry.append("GameTopLeft", ElectionsTopLeft);
   moduleRegistry.append("UniversalModMenu", ElectionsUniversalModMenu);
 };
@@ -419,11 +731,11 @@ function ElectionsMenuButton(): ReactElement {
   const { open } = useElectionsMenuState();
 
   return (
-    <Tooltip tooltip="Open the Elections panel. Shows the current mayor, active race, poll status, and campaign donation controls before election day.">
+    <Tooltip tooltip={t("UI.OpenPanel.Tooltip", "Open the Elections panel. Shows the current mayor, active race, poll status, and campaign donation controls before election day.")}>
       <Button
         variant="floating"
         selected={open}
-        aria-label="Open Elections"
+        aria-label={t("UI.OpenPanel.Aria", "Open Elections")}
         onSelect={() => {
           if (open) {
             trigger(mod.id, "setShowVotingLocations", false);
@@ -441,10 +753,17 @@ function ElectionsMenuPanel(): ReactElement | null {
   const { open, activeSection } = useElectionsMenuState();
   const panel = normalizePanel(useValue(panel$));
   const showVotingLocations = useValue(showVotingLocations$);
+  const [partyEditorOpen, setPartyEditorOpen] = useState(false);
   const candidates = useMemo(
-    () => [panel.candidateA ?? defaultPanel.candidateA, panel.candidateB ?? defaultPanel.candidateB],
-    [panel.candidateA, panel.candidateB]
+    () => getActiveCandidates(panel),
+    [panel.candidates, panel.candidateA, panel.candidateB]
   );
+
+  useEffect(() => {
+    if ((activeSection !== "parties" || !panel.partiesEnabled) && partyEditorOpen) {
+      setPartyEditorOpen(false);
+    }
+  }, [activeSection, panel.partiesEnabled, partyEditorOpen]);
 
   if (!open) {
     return null;
@@ -454,47 +773,66 @@ function ElectionsMenuPanel(): ReactElement | null {
   const menuItems: Array<{ section: PanelSection; label: string; title: string; tooltip: string; disabled?: boolean }> = [
     {
       section: "votingSites",
-      label: "View voting sites",
-      title: "Voting sites",
+      label: t("UI.Menu.VotingSites.Label", "View voting sites"),
+      title: t("UI.Menu.VotingSites.Title", "Voting sites"),
       tooltip: votingSitesEnabled
-        ? "Show voting locations on the map."
-        : "Voting locations unlock when Elections are enabled and the city reaches the minimum population.",
+        ? t("UI.Menu.VotingSites.Tooltip.Enabled", "Show voting locations on the map.")
+        : t("UI.Menu.VotingSites.Tooltip.Disabled", "Voting locations unlock when Elections are enabled and the city reaches the minimum population."),
       disabled: !votingSitesEnabled,
     },
     {
       section: "mayor",
-      label: "Current mayor panel",
-      title: "Current mayor",
-      tooltip: "Show the current mayor and mayoral actions.",
-    },
-    {
-      section: "residence",
-      label: "Mayor residence",
-      title: "Mayor residence",
-      tooltip: "Set the mayor's home and City Hall workplace from the selected building.",
+      label: t("UI.Menu.Mayor.Label", "Current mayor panel"),
+      title: t("UI.Menu.Mayor.Title", "Current mayor"),
+      tooltip: t("UI.Menu.Mayor.Tooltip", "Show the current mayor and mayoral actions."),
     },
     {
       section: "schedule",
-      label: "Election schedule",
-      title: "Election schedule",
-      tooltip: "Show election dates, voting hours, results time, and poll status.",
+      label: t("UI.Menu.Schedule.Label", "Election schedule"),
+      title: t("UI.Menu.Schedule.Title", "Election schedule"),
+      tooltip: t("UI.Menu.Schedule.Tooltip", "Show election dates, voting hours, results time, and poll status."),
     },
     {
       section: "programs",
-      label: "Civic programs",
-      title: "Civic programs",
-      tooltip: "Fund turnout support programs before election day.",
+      label: t("UI.Menu.Programs.Label", "Civic programs"),
+      title: t("UI.Menu.Programs.Title", "Civic programs"),
+      tooltip: t("UI.Menu.Programs.Tooltip", "Fund turnout support programs before election day."),
+    },
+    {
+      section: "legislation",
+      label: t("UI.Menu.Legislation.Label", "Legislation"),
+      title: t("UI.Menu.Legislation.Title", "Legislation"),
+      tooltip: t("UI.Menu.Legislation.Tooltip", "Pass or repeal persistent election legislation."),
     },
     {
       section: "candidates",
-      label: "Candidates",
-      title: "Candidates",
-      tooltip: "Show the mayoral candidates and campaign donation controls.",
+      label: t("UI.Menu.Candidates.Label", "Candidates"),
+      title: t("UI.Menu.Candidates.Title", "Candidates"),
+      tooltip: t("UI.Menu.Candidates.Tooltip", "Show the mayoral candidates and campaign donation controls."),
+    },
+    {
+      section: "parties",
+      label: t("UI.Menu.Parties.Label", "Parties"),
+      title: t("UI.Menu.Parties.Title", "Parties"),
+      tooltip: panel.partiesEnabled
+        ? t("UI.Menu.Parties.Tooltip.Enabled", "Manage fictional political parties, reputation, colors, and party tags.")
+        : t("UI.Menu.Parties.Tooltip.Disabled", "Political parties are disabled in mod settings."),
+      disabled: !panel.partiesEnabled,
+    },
+    {
+      section: "residence",
+      label: t("UI.Menu.Residence.Label", "Mayor residence"),
+      title: t("UI.Menu.Residence.Title", "Mayor residence"),
+      tooltip: t("UI.Menu.Residence.Tooltip", "Set the mayor's home and City Hall workplace from the selected building."),
     },
   ];
   const activeItem = menuItems.find((item) => item.section === activeSection) ?? menuItems[0];
   const subPanelClass = activeSection === "candidates"
     ? styles.subPanelWide
+    : activeSection === "parties"
+      ? partyEditorOpen
+        ? styles.subPanelPartiesEditing
+        : styles.subPanelWide
     : activeSection === "mayor"
       ? styles.subPanelMayor
     : activeSection === "residence"
@@ -503,11 +841,13 @@ function ElectionsMenuPanel(): ReactElement | null {
       ? styles.subPanelMedium
     : activeSection === "programs"
       ? styles.subPanelPrograms
+    : activeSection === "legislation"
+      ? styles.subPanelPrograms
       : styles.subPanelNarrow;
 
   return (
     <div className={styles.menuCluster}>
-      <nav draggable className={styles.sideMenu} aria-label="Election panels">
+      <nav draggable className={styles.sideMenu} aria-label={t("UI.Panel.Aria", "Election panels")}>
         {menuItems.map((item) => (
           <Tooltip tooltip={item.tooltip} key={item.section}>
             <button
@@ -547,6 +887,7 @@ function ElectionsMenuPanel(): ReactElement | null {
             panel={panel}
             candidates={candidates}
             showVotingLocations={showVotingLocations}
+            onPartyEditorOpenChange={setPartyEditorOpen}
           />
         </main>
       </section>
@@ -606,6 +947,29 @@ function PanelMenuIcon(props: { section: PanelSection }): ReactElement {
     );
   }
 
+  if (props.section === "legislation") {
+    return (
+      <svg className={`${styles.sideMenuIcon} ${styles.sideMenuGlyphIcon}`} viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 3.5h8l3 3V20H7a1.5 1.5 0 0 1-1.5-1.5V5A1.5 1.5 0 0 1 7 3.5Z" />
+        <path d="M15 3.5V7h3" />
+        <path d="M8.5 11h7" />
+        <path d="M8.5 14h7" />
+        <path d="M8.5 17h5" />
+      </svg>
+    );
+  }
+
+  if (props.section === "parties") {
+    return (
+      <svg className={`${styles.sideMenuIcon} ${styles.sideMenuGlyphIcon}`} viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 20V5" />
+        <path d="M5 5h11l-1.5 3L16 11H5" />
+        <path d="M8 15h9" />
+        <path d="M8 18h6" />
+      </svg>
+    );
+  }
+
   return (
     <svg className={`${styles.sideMenuIcon} ${styles.sideMenuGlyphIcon}`} viewBox="0 0 24 24" aria-hidden="true">
       <path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
@@ -622,11 +986,14 @@ function PanelNotices(props: { panel: ElectionPanel }): ReactElement {
   return (
     <>
       {!panel.enabled && (
-        <div className={styles.notice}>Elections are disabled in mod settings.</div>
+        <div className={styles.notice}>{t("UI.Notice.Disabled", "Elections are disabled in mod settings.")}</div>
       )}
       {panel.enabled && panel.waitingForPopulation && (
         <div className={styles.notice}>
-          Elections will start when the city reaches {formatAmount(panel.minimumPopulation)} population. Current population: {formatAmount(panel.currentPopulation)}.
+          {t("UI.Notice.WaitingPopulation", "Elections will start when the city reaches {minimum} population. Current population: {current}.", {
+            minimum: formatAmount(panel.minimumPopulation),
+            current: formatAmount(panel.currentPopulation),
+          })}
         </div>
       )}
     </>
@@ -638,14 +1005,15 @@ function ActivePanelContent(props: {
   panel: ElectionPanel;
   candidates: Candidate[];
   showVotingLocations: boolean;
+  onPartyEditorOpenChange: (open: boolean) => void;
 }): ReactElement {
-  const { activeSection, panel, candidates, showVotingLocations } = props;
+  const { activeSection, panel, candidates, showVotingLocations, onPartyEditorOpenChange } = props;
 
   if (activeSection === "mayor") {
     return panel.mayorName ? (
-      <MayorSection panel={panel} />
+      <MayorSection panel={panel} candidates={candidates} />
     ) : (
-      <div className={styles.notice}>No mayor has been selected yet.</div>
+      <div className={styles.notice}>{t("UI.Notice.NoMayor", "No mayor has been selected yet.")}</div>
     );
   }
 
@@ -654,29 +1022,53 @@ function ActivePanelContent(props: {
   }
 
   if (activeSection === "schedule") {
-    return <ScheduleSection panel={panel} />;
+    return <ScheduleSection panel={panel} candidates={candidates} />;
   }
 
   if (activeSection === "programs") {
     return <SupportProgramsPanel panel={panel} />;
   }
 
+  if (activeSection === "legislation") {
+    return <LegislationPanel panel={panel} />;
+  }
+
   if (activeSection === "candidates") {
+    const candidateRows = getCandidateRows(candidates, 2);
+
     if (!hasActiveCandidateField(panel)) {
-      return <div className={styles.notice}>There are no candidates right now.</div>;
+      return <div className={styles.notice}>{t("UI.Notice.NoCandidates", "There are no candidates right now.")}</div>;
     }
 
     return (
       <section className={styles.candidateStack}>
-        {candidates.map((candidate) => (
-          <CandidateCard
-            key={candidate.index}
-            candidate={candidate}
-            donationTiers={panel.donationTiers ?? []}
-            donationsOpen={panel.donationsOpen}
-          />
+        {candidateRows.map((row, rowIndex) => (
+          <div className={styles.candidateRow} key={`candidate-row-${rowIndex}`}>
+            {row.map((candidate) => (
+              <div className={styles.candidateSlot} key={candidate.index}>
+                <CandidateCard
+                  candidate={candidate}
+                  donationTiers={panel.donationTiers ?? []}
+                  donationsOpen={panel.donationsOpen}
+                  canDonate={panel.canDonate}
+                  donationUsedToday={panel.donationUsedToday}
+                />
+              </div>
+            ))}
+            {row.length < 2 && (
+              <div className={`${styles.candidateSlot} ${styles.candidateSlotEmpty}`} aria-hidden="true" />
+            )}
+          </div>
         ))}
       </section>
+    );
+  }
+
+  if (activeSection === "parties") {
+    return panel.partiesEnabled ? (
+      <PartiesSection panel={panel} onEditorOpenChange={onPartyEditorOpenChange} />
+    ) : (
+      <div className={styles.notice}>{t("UI.Notice.PartiesDisabled", "Parties are disabled in mod settings.")}</div>
     );
   }
 
@@ -699,38 +1091,38 @@ function VotingSitesPanel(props: {
   return (
     <section className={styles.votingSitesPanel}>
       <div className={styles.sectionHeader}>
-        <Tooltip tooltip="Voting-site overlay status. On election day, map markers include live vote counts for each location.">
-          <span>Voting sites</span>
+        <Tooltip tooltip={t("UI.VotingSites.Header.Tooltip", "Voting-site overlay status. On election day, map markers include live vote counts for each location.")}>
+          <span>{t("UI.VotingSites.Header", "Voting sites")}</span>
         </Tooltip>
-        <Tooltip tooltip={showVotingLocations ? "Voting-site overlay is visible." : "Voting-site overlay is hidden."}>
-          <strong>{showVotingLocations ? "Overlay visible" : "Overlay hidden"}</strong>
+        <Tooltip tooltip={showVotingLocations ? t("UI.VotingSites.Status.Visible.Tooltip", "Voting-site overlay is visible.") : t("UI.VotingSites.Status.Hidden.Tooltip", "Voting-site overlay is hidden.")}>
+          <strong>{showVotingLocations ? t("UI.VotingSites.Status.Visible", "Overlay visible") : t("UI.VotingSites.Status.Hidden", "Overlay hidden")}</strong>
         </Tooltip>
       </div>
 
       <div className={styles.votingSitesSummary}>
-        <Tooltip tooltip="Election date and voting window for the active mayoral race.">
+        <Tooltip tooltip={t("UI.VotingSites.Election.Tooltip", "Election date and voting window for the active mayoral race.")}>
           <div className={styles.votingSitesStatus}>
-            <span>Election</span>
+            <span>{t("UI.VotingSites.Election.Label", "Election")}</span>
             <strong>
               {panel.electionDate
                 ? `${panel.electionDate} ${panel.votingStartTime || "08:00"}-${panel.votingEndTime || "17:00"}`
-                : "Pending"}
+                : t("UI.Pending", "Pending")}
             </strong>
           </div>
         </Tooltip>
-        <Tooltip tooltip="Live vote counts appear only during the voting phase.">
+        <Tooltip tooltip={t("UI.VotingSites.Markers.Tooltip", "Live vote counts appear only during the voting phase.")}>
           <div className={styles.votingSitesStatus}>
-            <span>Map markers</span>
-            <strong>{electionDay ? "Live results" : "Voting locations"}</strong>
+            <span>{t("UI.VotingSites.Markers.Label", "Map markers")}</span>
+            <strong>{electionDay ? t("UI.VotingSites.Markers.Live", "Live results") : t("UI.VotingSites.Markers.Locations", "Voting locations")}</strong>
           </div>
         </Tooltip>
       </div>
 
       <Tooltip tooltip={canShowLocations
         ? showVotingLocations
-          ? "Hide voting locations on the map."
-          : "Show voting locations on the map."
-        : "Voting locations unlock when Elections are enabled and the city reaches the minimum population."}
+          ? t("UI.VotingSites.Button.Tooltip.Hide", "Hide voting locations on the map.")
+          : t("UI.VotingSites.Button.Tooltip.Show", "Show voting locations on the map.")
+        : t("UI.Menu.VotingSites.Tooltip.Disabled", "Voting locations unlock when Elections are enabled and the city reaches the minimum population.")}
       >
         <button
           type="button"
@@ -745,7 +1137,7 @@ function VotingSitesPanel(props: {
         >
           <BallotBoxIcon />
           <span className={styles.votingLocationsButtonLabel}>
-            {showVotingLocations ? "Hide voting sites" : "View voting sites"}
+            {showVotingLocations ? t("UI.VotingSites.Button.Hide", "Hide voting sites") : t("UI.VotingSites.Button.Show", "View voting sites")}
           </span>
         </button>
       </Tooltip>
@@ -768,15 +1160,15 @@ function Info(props: { label: string; value: string; tooltip: string }): ReactEl
   );
 }
 
-function ScheduleSection(props: { panel: ElectionPanel }): ReactElement {
-  const { panel } = props;
+function ScheduleSection(props: { panel: ElectionPanel; candidates: Candidate[] }): ReactElement {
+  const { panel, candidates } = props;
   const [pollTab, setPollTab] = useState<"overall" | "age" | "education" | "income">("overall");
   const votingWindow = panel.votingStartTime && panel.votingEndTime
     ? `${panel.votingStartTime}-${panel.votingEndTime}`
-    : "Pending";
+    : t("UI.Pending", "Pending");
   const electionSchedule = panel.electionDate
     ? `${panel.electionDate} ${votingWindow}`
-    : "Pending";
+    : t("UI.Pending", "Pending");
   const resultsSchedule = panel.electionDate
     ? `${panel.electionDate} ${panel.resultsTime || "20:00"}`
     : panel.resultsTime || "20:00";
@@ -784,45 +1176,52 @@ function ScheduleSection(props: { panel: ElectionPanel }): ReactElement {
   return (
     <section className={styles.scheduleCard}>
       <div className={styles.sectionHeader}>
-        <Tooltip tooltip="Election schedule and current lifecycle phase.">
-          <span>Election schedule</span>
+        <Tooltip tooltip={t("UI.Schedule.Header.Tooltip", "Election schedule and current lifecycle phase.")}>
+          <span>{t("UI.Schedule.Header", "Election schedule")}</span>
         </Tooltip>
       </div>
 
-      <Tooltip tooltip="Summary of the current election cycle and whether this is a regular or accelerated race.">
+      <Tooltip tooltip={t("UI.Schedule.Summary.Tooltip", "Summary of the current election cycle and whether this is a regular or accelerated race.")}>
         <div className={styles.summaryText}>{panel.cycleLabel}</div>
       </Tooltip>
 
       <div className={styles.metaGrid}>
         <Info
-          label="Phase"
-          value={panel.stageLabel || "Pending"}
-          tooltip="The current phase of the election cycle."
+          label={t("UI.Info.Phase", "Phase")}
+          value={panel.stageLabel || t("UI.Pending", "Pending")}
+          tooltip={t("UI.Schedule.Phase.Tooltip", "The current phase of the election cycle.")}
         />
         <Info
-          label="Poll"
-          value={panel.pollDate ? `${panel.pollDate} 08:00` : "Pending"}
-          tooltip="The campaign poll is released at 08:00 on this date."
+          label={t("UI.Info.Poll", "Poll")}
+          value={panel.pollDate ? `${panel.pollDate} 08:00` : t("UI.Pending", "Pending")}
+          tooltip={t("UI.Schedule.Poll.Tooltip", "The campaign poll is released at 08:00 on this date.")}
         />
         <Info
-          label="Election"
+          label={t("UI.Info.Election", "Election")}
           value={electionSchedule}
-          tooltip="Election day and voting window for the active mayoral race."
+          tooltip={t("UI.Schedule.Election.Tooltip", "Election day and voting window for the active mayoral race.")}
         />
         <Info
-          label="Results"
+          label={t("UI.Info.Results", "Results")}
           value={resultsSchedule}
-          tooltip="Election results announcement date and time."
+          tooltip={t("UI.Schedule.Results.Tooltip", "Election results announcement date and time.")}
         />
+        {panel.pendingMayorName && (
+          <Info
+            label={t("UI.Info.Inauguration", "Inauguration")}
+            value={panel.pendingMayorInaugurationDate || t("UI.Date.January1", "January 1")}
+            tooltip={t("UI.Schedule.Inauguration.Tooltip", "{name} is mayor-elect. The sitting mayor remains in office until this date.", { name: panel.pendingMayorName })}
+          />
+        )}
       </div>
 
       <div className={styles.pollBlock}>
         <div className={styles.pollHeader}>
-          <Tooltip tooltip="Poll status. Before the poll is released this shows the scheduled release date; after release it shows sampled voter preferences.">
-            <span>{panel.pollReleased ? "Current poll results" : "Poll scheduled"}</span>
+          <Tooltip tooltip={t("UI.Poll.Header.Tooltip", "Poll status. Before the poll is released this shows the scheduled release date; after release it shows sampled voter preferences.")}>
+            <span>{panel.pollReleased ? t("UI.Poll.Header.Results", "Current poll results") : t("UI.Poll.Header.Scheduled", "Poll scheduled")}</span>
           </Tooltip>
           {panel.pollReleased && (
-            <Tooltip tooltip="Number of eligible residents sampled by the campaign poll.">
+            <Tooltip tooltip={t("UI.Poll.Sample.Tooltip", "Number of eligible residents sampled by the campaign poll.")}>
               <strong className={styles.pollSample}>
                 <SampleSizeLabel value={panel.poll.sampleSize} />
               </strong>
@@ -832,14 +1231,14 @@ function ScheduleSection(props: { panel: ElectionPanel }): ReactElement {
 
         {panel.pollReleased ? (
           <>
-            <div className={styles.pollTabs} role="tablist" aria-label="Poll breakdown">
+            <div className={styles.pollTabs} role="tablist" aria-label={t("UI.Poll.Tabs.Aria", "Poll breakdown")}>
               {[
-                { key: "overall" as const, label: "Overall" },
-                { key: "age" as const, label: "Age" },
-                { key: "education" as const, label: "Education" },
-                { key: "income" as const, label: "Income" },
+                { key: "overall" as const, label: t("UI.Poll.Tab.Overall", "Overall") },
+                { key: "age" as const, label: t("UI.Poll.Tab.Age", "Age") },
+                { key: "education" as const, label: t("UI.Poll.Tab.Education", "Education") },
+                { key: "income" as const, label: t("UI.Poll.Tab.Income", "Income") },
               ].map((tab) => (
-                <Tooltip tooltip={`Show ${tab.label.toLowerCase()} poll results.`} key={tab.key}>
+                <Tooltip tooltip={t("UI.Poll.Tab.Tooltip", "Show {label} poll results.", { label: tab.label.toLowerCase() })} key={tab.key}>
                   <button
                     type="button"
                     role="tab"
@@ -855,37 +1254,33 @@ function ScheduleSection(props: { panel: ElectionPanel }): ReactElement {
             {pollTab === "overall" && (
               <PollResultView
                 poll={panel.poll}
-                candidateAName={panel.candidateA.name}
-                candidateBName={panel.candidateB.name}
+                candidates={candidates}
               />
             )}
             {pollTab === "age" && (
               <PollBreakdownList
                 groups={panel.poll.ageGroups}
-                candidateAName={panel.candidateA.name}
-                candidateBName={panel.candidateB.name}
+                candidates={candidates}
               />
             )}
             {pollTab === "education" && (
               <PollBreakdownList
                 groups={panel.poll.educationGroups}
-                candidateAName={panel.candidateA.name}
-                candidateBName={panel.candidateB.name}
+                candidates={candidates}
               />
             )}
             {pollTab === "income" && (
               <PollBreakdownList
                 groups={panel.poll.incomeGroups}
-                candidateAName={panel.candidateA.name}
-                candidateBName={panel.candidateB.name}
+                candidates={candidates}
               />
             )}
           </>
         ) : (
           <div className={styles.notice}>
             {panel.pollDate
-              ? `Poll releases on ${panel.pollDate} at 08:00.`
-              : "Poll date is pending."}
+              ? t("UI.Poll.ReleaseNotice", "Poll releases on {date} at 08:00.", { date: panel.pollDate })
+              : t("UI.Poll.PendingNotice", "Poll date is pending.")}
           </div>
         )}
       </div>
@@ -895,25 +1290,26 @@ function ScheduleSection(props: { panel: ElectionPanel }): ReactElement {
 
 function PollRows(props: {
   poll: PollResult;
-  candidateAName: string;
-  candidateBName: string;
+  candidates: Candidate[];
 }): ReactElement {
-  const { poll, candidateAName, candidateBName } = props;
+  const { poll, candidates } = props;
+  const candidateResults = getPollCandidateResults(poll, candidates);
 
   return (
     <div className={styles.pollRows}>
+      {candidateResults.map((result) => {
+        const candidate = candidates.find((item) => item.index === result.index);
+        return (
+          <PollRow
+            key={result.index}
+            label={result.name}
+            value={result.percent}
+            color={candidate ? getCandidateDisplayColor(candidate) : getCandidateColor(result.index)}
+          />
+        );
+      })}
       <PollRow
-        label={candidateAName}
-        value={poll.percentA}
-        color={candidateAColor}
-      />
-      <PollRow
-        label={candidateBName}
-        value={poll.percentB}
-        color={candidateBColor}
-      />
-      <PollRow
-        label="Undecided"
+        label={t("UI.Poll.Undecided", "Undecided")}
         value={poll.percentUndecided}
         color={undecidedColor}
       />
@@ -925,23 +1321,22 @@ function SampleSizeLabel(props: { value: number }): ReactElement {
   return (
     <span className={styles.sampleSizeLabel}>
       <span>{formatAmount(props.value)}</span>
-      <span className={styles.sampleSizeWord}>sampled</span>
+      <span className={styles.sampleSizeWord}>{t("UI.Poll.Sample.Word", "sampled")}</span>
     </span>
   );
 }
 
 function PollResultView(props: {
   poll: PollResult;
-  candidateAName: string;
-  candidateBName: string;
+  candidates: Candidate[];
 }): ReactElement {
-  const { poll, candidateAName, candidateBName } = props;
+  const { poll, candidates } = props;
 
   return (
     <>
-      <Tooltip tooltip={poll.resultDescription || "Poll read based on the sample and margin of error."}>
+      <Tooltip tooltip={poll.resultDescription || t("UI.Poll.Readout.Tooltip", "Poll read based on the sample and margin of error.")}>
         <div className={styles.pollReadout}>
-          <strong>{poll.resultLabel || "Poll released"}</strong>
+          <strong>{poll.resultLabel || t("UI.Poll.Released", "Poll released")}</strong>
           <span className={styles.pollReadoutMeta}>
             <SampleSizeLabel value={poll.sampleSize} />
             <span className={styles.pollMetaSeparator}>|</span>
@@ -951,8 +1346,7 @@ function PollResultView(props: {
       </Tooltip>
       <PollRows
         poll={poll}
-        candidateAName={candidateAName}
-        candidateBName={candidateBName}
+        candidates={candidates}
       />
     </>
   );
@@ -960,8 +1354,7 @@ function PollResultView(props: {
 
 function PollBreakdownList(props: {
   groups: PollBreakdown[];
-  candidateAName: string;
-  candidateBName: string;
+  candidates: Candidate[];
 }): ReactElement {
   const groups = Array.isArray(props.groups) ? props.groups : [];
 
@@ -971,12 +1364,11 @@ function PollBreakdownList(props: {
         <PollBreakdownCard
           key={group.key || group.label}
           group={group}
-          candidateAName={props.candidateAName}
-          candidateBName={props.candidateBName}
+          candidates={props.candidates}
         />
       ))}
       {!groups.length && (
-        <div className={styles.notice}>No poll breakdown data is available.</div>
+        <div className={styles.notice}>{t("UI.Poll.NoBreakdown", "No poll breakdown data is available.")}</div>
       )}
     </div>
   );
@@ -984,14 +1376,13 @@ function PollBreakdownList(props: {
 
 function PollBreakdownCard(props: {
   group: PollBreakdown;
-  candidateAName: string;
-  candidateBName: string;
+  candidates: Candidate[];
 }): ReactElement {
-  const { group, candidateAName, candidateBName } = props;
+  const { group, candidates } = props;
 
   return (
     <article className={styles.pollBreakdownCard}>
-      <Tooltip tooltip={group.resultDescription || "Poll read for this sampled group."}>
+      <Tooltip tooltip={group.resultDescription || t("UI.Poll.Breakdown.Tooltip", "Poll read for this sampled group.")}>
         <div className={styles.pollBreakdownHeader}>
           <span className={styles.pollBreakdownTitle}>{group.label}</span>
           <span className={styles.pollBreakdownMeta}>
@@ -1003,8 +1394,7 @@ function PollBreakdownCard(props: {
       </Tooltip>
       <PollRows
         poll={group}
-        candidateAName={candidateAName}
-        candidateBName={candidateBName}
+        candidates={candidates}
       />
     </article>
   );
@@ -1014,33 +1404,39 @@ function SupportProgramsPanel(props: { panel: ElectionPanel }): ReactElement {
   const { panel } = props;
   const programs = Array.isArray(panel.supportPrograms) ? panel.supportPrograms : [];
   const fallbackReason = panel.stage === "Voting"
-    ? "Civic programs are unavailable on election day."
+    ? t("UI.Programs.Fallback.ElectionDay", "Civic programs are unavailable on election day.")
     : panel.supportProgramUsedToday
-      ? `Only one civic program can be funded per day. Today's program is ${panel.supportProgramUsedTodayLabel || "already selected"}.`
-      : "Civic programs are available before election day once candidates are selected.";
+      ? t("UI.Programs.Fallback.UsedToday", "Only one civic program can be funded per day. Today's program is {program}.", {
+        program: panel.supportProgramUsedTodayLabel || t("UI.Programs.Fallback.AlreadySelected", "already selected"),
+      })
+      : t("UI.Programs.Fallback.Closed", "Civic programs are available before election day once candidates are selected.");
 
   return (
     <section className={styles.supportProgramsPanel}>
       <div className={styles.sectionHeader}>
-        <Tooltip tooltip="Civic programs can be funded once per day before election day.">
-          <span>Civic programs</span>
+        <Tooltip tooltip={t("UI.Programs.Header.Tooltip", "Civic programs can be funded once per day before election day.")}>
+          <span>{t("UI.Programs.Header", "Civic programs")}</span>
         </Tooltip>
-        <Tooltip tooltip="Each civic program costs half of the current campaign donation value.">
-          <strong>{formatAmount(panel.supportProgramCost)} each</strong>
+        <Tooltip tooltip={t("UI.Programs.Cost.Tooltip", "Each civic program costs half of the current campaign donation value.")}>
+          <strong>{t("UI.Each", "{amount} each", { amount: formatAmount(panel.supportProgramCost) })}</strong>
         </Tooltip>
       </div>
 
       {panel.supportProgramUsedToday && (
-        <Tooltip tooltip="The daily civic program slot refreshes on the next calendar day.">
-          <div className={styles.notice}>Today's program: {panel.supportProgramUsedTodayLabel || "selected"}</div>
+        <Tooltip tooltip={t("UI.Programs.Today.Tooltip", "The daily civic program slot refreshes on the next calendar day.")}>
+          <div className={styles.notice}>
+            {t("UI.Programs.Today", "Today's program: {program}", {
+              program: panel.supportProgramUsedTodayLabel || t("UI.Programs.Today.Selected", "selected"),
+            })}
+          </div>
         </Tooltip>
       )}
 
       <div className={styles.supportProgramList}>
         {programs.map((program) => {
           const status = program.index === 0
-            ? program.active ? "Holiday scheduled" : "Not scheduled"
-            : `Current bonus +${program.currentBonusPercent || 0}%`;
+            ? program.active ? t("UI.Programs.Status.HolidayScheduled", "Holiday scheduled") : t("UI.Programs.Status.NotScheduled", "Not scheduled")
+            : t("UI.Programs.Status.CurrentBonus", "Current bonus +{percent}%", { percent: program.currentBonusPercent || 0 });
           const tooltip = program.canRun
             ? program.tooltip
             : program.disabledReason || program.tooltip || fallbackReason;
@@ -1057,7 +1453,7 @@ function SupportProgramsPanel(props: { panel: ElectionPanel }): ReactElement {
                     <span className={styles.supportProgramDescription}>{program.description}</span>
                   </div>
                 </Tooltip>
-                <Tooltip tooltip={program.index === 0 ? "Holiday scheduling status." : "Accumulated election turnout bonus for this voter group."}>
+                <Tooltip tooltip={program.index === 0 ? t("UI.Programs.Status.Tooltip.Holiday", "Holiday scheduling status.") : t("UI.Programs.Status.Tooltip.Bonus", "Accumulated election turnout bonus for this voter group.")}>
                   <strong className={styles.supportProgramStatus}>{status}</strong>
                 </Tooltip>
               </div>
@@ -1073,7 +1469,7 @@ function SupportProgramsPanel(props: { panel: ElectionPanel }): ReactElement {
                     }
                   }}
                 >
-                  <strong>{program.canRun ? "Fund" : program.active && program.index === 0 ? "Scheduled" : "Unavailable"}</strong>
+                  <strong>{program.canRun ? t("UI.Programs.Button.Fund", "Fund") : program.active && program.index === 0 ? t("UI.Programs.Button.Scheduled", "Scheduled") : t("UI.Unavailable", "Unavailable")}</strong>
                 </Button>
               </Tooltip>
             </article>
@@ -1082,9 +1478,84 @@ function SupportProgramsPanel(props: { panel: ElectionPanel }): ReactElement {
       </div>
 
       {!programs.length && (
-        <div className={styles.notice}>Civic programs are unavailable right now.</div>
+        <div className={styles.notice}>{t("UI.Programs.NoPrograms", "Civic programs are unavailable right now.")}</div>
       )}
       {!panel.supportProgramsOpen && programs.length > 0 && (
+        <div className={styles.helpText}>{fallbackReason}</div>
+      )}
+    </section>
+  );
+}
+
+function LegislationPanel(props: { panel: ElectionPanel }): ReactElement {
+  const { panel } = props;
+  const legislation = Array.isArray(panel.legislation) ? panel.legislation : [];
+  const fallbackReason = panel.stage === "Voting"
+    ? t("UI.Legislation.Fallback.ElectionDay", "Election legislation is unavailable on election day.")
+    : panel.legislationActionUsedToday
+      ? t("UI.Legislation.Fallback.UsedToday", "Only one election legislation action can be attempted per day.")
+    : t("UI.Legislation.Fallback.Closed", "Election legislation can be changed before election day once candidates are selected.");
+
+  return (
+    <section className={styles.legislationPanel}>
+      <div className={styles.sectionHeader}>
+        <Tooltip tooltip={t("UI.Legislation.Header.Tooltip", "Legislation persists across future elections until it is repealed. Passing and repealing use city funds, can fail, and do not create corruption risk.")}>
+          <span>{t("UI.Legislation.Header", "Election legislation")}</span>
+        </Tooltip>
+      </div>
+
+      <div className={styles.legislationList}>
+        {legislation.map((law) => {
+          const actionEnabled = law.active ? law.canRepeal : law.canPass;
+          const buttonLabel = law.active ? t("UI.Legislation.Button.Repeal", "Repeal") : t("UI.Legislation.Button.Pass", "Pass");
+          const tooltip = actionEnabled
+            ? law.tooltip || law.description
+            : law.disabledReason || fallbackReason;
+
+          return (
+            <article
+              className={`${styles.legislationCard} ${law.active ? styles.legislationCardActive : ""}`}
+              key={law.index}
+            >
+              <div className={styles.legislationInfo}>
+                <Tooltip tooltip={law.tooltip || law.description}>
+                  <div>
+                    <span className={styles.legislationTitle}>{law.title}</span>
+                    <span className={styles.legislationDescription}>{law.description}</span>
+                  </div>
+                </Tooltip>
+                {law.active && (
+                  <div className={styles.legislationMetaRow}>
+                    <Tooltip tooltip={t("UI.Legislation.Active.Tooltip", "Active legislation remains in effect across elections.")}>
+                      <strong className={styles.legislationStatusActive}>{t("UI.Legislation.Active", "Active")}</strong>
+                    </Tooltip>
+                  </div>
+                )}
+              </div>
+              <Tooltip tooltip={tooltip}>
+                <Button
+                  variant="flat"
+                  className={actionEnabled ? styles.legislationButton : `${styles.legislationButton} ${styles.legislationButtonDisabled}`}
+                  disabled={!actionEnabled}
+                  aria-disabled={!actionEnabled}
+                  onSelect={() => {
+                    if (actionEnabled) {
+                      trigger(mod.id, "setLegislation", law.index, !law.active);
+                    }
+                  }}
+                >
+                  <strong>{actionEnabled ? buttonLabel : t("UI.Unavailable", "Unavailable")}</strong>
+                </Button>
+              </Tooltip>
+            </article>
+          );
+        })}
+      </div>
+
+      {!legislation.length && (
+        <div className={styles.notice}>{t("UI.Legislation.NoLegislation", "Election legislation is unavailable right now.")}</div>
+      )}
+      {!panel.legislationOpen && legislation.length > 0 && (
         <div className={styles.helpText}>{fallbackReason}</div>
       )}
     </section>
@@ -1102,22 +1573,22 @@ function MayorResidenceSection(props: { panel: ElectionPanel }): ReactElement {
   return (
     <section className={styles.residenceCard}>
       <div className={styles.sectionHeader}>
-        <Tooltip tooltip="The assigned residence and office are enforced for the current mayor. If the target is full, another resident or worker is removed first.">
-          <span>Mayor assignments</span>
+        <Tooltip tooltip={t("UI.Residence.Header.Tooltip", "The assigned residence and office are enforced for the current mayor. If the target is full, another resident or worker is removed first.")}>
+          <span>{t("UI.Residence.Header", "Mayor assignments")}</span>
         </Tooltip>
-        <Tooltip tooltip={home.atTarget && workplace.atTarget ? "The mayor is assigned to both selected targets." : "The mayor will be moved to the selected targets during the next assignment update."}>
-          <strong>{home.atTarget && workplace.atTarget ? "Assigned" : "Relocating"}</strong>
+        <Tooltip tooltip={home.atTarget && workplace.atTarget ? t("UI.Residence.Status.Assigned.Tooltip", "The mayor is assigned to both selected targets.") : t("UI.Residence.Status.Relocating.Tooltip", "The mayor will be moved to the selected targets during the next assignment update.")}>
+          <strong>{home.atTarget && workplace.atTarget ? t("UI.Residence.Status.Assigned", "Assigned") : t("UI.Residence.Status.Relocating", "Relocating")}</strong>
         </Tooltip>
       </div>
 
-      <Tooltip tooltip={selected.exists ? "Currently selected game building." : "No building is selected in the game UI."}>
+      <Tooltip tooltip={selected.exists ? t("UI.Residence.Selected.Tooltip.Exists", "Currently selected game building.") : t("UI.Residence.Selected.Tooltip.Empty", "No building is selected in the game UI.")}>
         <div className={styles.selectedBuildingBox}>
-          <span>Selected building</span>
+          <span>{t("UI.Residence.Selected.Label", "Selected building")}</span>
           <strong>{selected.name}</strong>
           {selected.exists && (
             <div className={styles.selectedBuildingTags}>
-              <span className={selected.canBeHome ? styles.targetTagActive : styles.targetTagMuted}>Home</span>
-              <span className={selected.canBeWorkplace ? styles.targetTagActive : styles.targetTagMuted}>City Hall</span>
+              <span className={selected.canBeHome ? styles.targetTagActive : styles.targetTagMuted}>{t("UI.Residence.Tag.Home", "Home")}</span>
+              <span className={selected.canBeWorkplace ? styles.targetTagActive : styles.targetTagMuted}>{t("UI.Residence.Tag.CityHall", "City Hall")}</span>
             </div>
           )}
         </div>
@@ -1125,7 +1596,7 @@ function MayorResidenceSection(props: { panel: ElectionPanel }): ReactElement {
 
       <MayorTargetCard
         kind="home"
-        title="Mayor home"
+        title={t("UI.Residence.Home.Title", "Mayor home")}
         target={home}
         choices={homeChoices}
         choicesLimited={panel.mayorHomeChoicesLimited}
@@ -1139,7 +1610,7 @@ function MayorResidenceSection(props: { panel: ElectionPanel }): ReactElement {
 
       <MayorTargetCard
         kind="workplace"
-        title="Mayor workplace"
+        title={t("UI.Residence.Workplace.Title", "Mayor workplace")}
         target={workplace}
         choices={workplaceChoices}
         choicesLimited={panel.mayorWorkplaceChoicesLimited}
@@ -1169,33 +1640,33 @@ function MayorTargetCard(props: {
 }): ReactElement {
   const { kind, title, target, choices, choicesLimited, selected, canUseSelected, alreadySelected, choiceTrigger, focusTrigger, useTrigger } = props;
   const status = target.atTarget
-    ? "Mayor assigned"
+    ? t("UI.Residence.Target.Status.Assigned", "Mayor assigned")
     : target.exists
-      ? "Move pending"
-      : "No target";
+      ? t("UI.Residence.Target.Status.Pending", "Move pending")
+      : t("UI.Residence.Target.Status.None", "No target");
   const useDisabled = !selected.exists || !canUseSelected || alreadySelected;
   const useTooltip = alreadySelected
-    ? "This building is already selected."
+    ? t("UI.Residence.Use.Tooltip.Selected", "This building is already selected.")
     : canUseSelected
       ? kind === "home"
-        ? "Assign the mayor's household to this low-density residence."
-        : "Assign the mayor to work at this City Hall."
+        ? t("UI.Residence.Use.Tooltip.Home", "Assign the mayor's household to this low-density residence.")
+        : t("UI.Residence.Use.Tooltip.Workplace", "Assign the mayor to work at this City Hall.")
       : kind === "home"
-        ? "Selected building must be a low-density residential building."
-        : "Selected building must be a City Hall asset.";
+        ? t("UI.Residence.Use.Tooltip.HomeInvalid", "Selected building must be a low-density residential building.")
+        : t("UI.Residence.Use.Tooltip.WorkplaceInvalid", "Selected building must be a City Hall asset.");
 
   return (
     <article className={styles.residenceTargetCard}>
       <div className={styles.residenceTargetHeader}>
         <div className={styles.residenceTargetTitle}>
-          <Tooltip tooltip={kind === "home" ? "Saved mayor residence target." : "Saved mayor workplace target."}>
+          <Tooltip tooltip={kind === "home" ? t("UI.Residence.Target.Home.Tooltip", "Saved mayor residence target.") : t("UI.Residence.Target.Workplace.Tooltip", "Saved mayor workplace target.")}>
             <span>{title}</span>
           </Tooltip>
           <Tooltip tooltip={target.entityLabel}>
             <strong>{target.name}</strong>
           </Tooltip>
         </div>
-        <Tooltip tooltip={target.atTarget ? "The mayor is already assigned here." : "The assignment system will move the mayor here."}>
+        <Tooltip tooltip={target.atTarget ? t("UI.Residence.Target.Assigned.Tooltip", "The mayor is already assigned here.") : t("UI.Residence.Target.Move.Tooltip", "The assignment system will move the mayor here.")}>
           <span className={target.atTarget ? styles.targetTagActive : styles.targetTagPending}>{status}</span>
         </Tooltip>
       </div>
@@ -1210,14 +1681,14 @@ function MayorTargetCard(props: {
 
       <div className={styles.residenceMetaGrid}>
         <Info
-          label="Current"
-          value={target.currentExists ? target.currentName : "Unknown"}
+          label={t("UI.Info.Current", "Current")}
+          value={target.currentExists ? target.currentName : t("UI.Unknown", "Unknown")}
           tooltip={target.currentEntityLabel}
         />
       </div>
 
       <div className={styles.residenceActionRow}>
-        <Tooltip tooltip={target.canFocus ? "Move the camera to the selected mayor target." : "No target is available to focus."}>
+        <Tooltip tooltip={target.canFocus ? t("UI.Residence.Focus.Tooltip.Enabled", "Move the camera to the selected mayor target.") : t("UI.Residence.Focus.Tooltip.Disabled", "No target is available to focus.")}>
           <Button
             variant="flat"
             className={target.canFocus ? styles.residenceActionButton : `${styles.residenceActionButton} ${styles.bribeButtonDisabled}`}
@@ -1229,7 +1700,7 @@ function MayorTargetCard(props: {
               }
             }}
           >
-            <strong>Focus</strong>
+            <strong>{t("UI.Residence.Focus", "Focus")}</strong>
           </Button>
         </Tooltip>
         <Tooltip tooltip={useTooltip}>
@@ -1244,7 +1715,7 @@ function MayorTargetCard(props: {
               }
             }}
           >
-            <strong>{alreadySelected ? "Selected" : "Use selected"}</strong>
+            <strong>{alreadySelected ? t("UI.Selected", "Selected") : t("UI.Residence.Use", "Use selected")}</strong>
           </Button>
         </Tooltip>
       </div>
@@ -1260,13 +1731,13 @@ function MayorChoiceDropdown(props: {
   choiceTrigger: string;
 }): ReactElement {
   const { kind, target, choices, choicesLimited, choiceTrigger } = props;
-  const label = target.exists ? target.name : kind === "home" ? "Choose a residence" : "Choose a City Hall";
+  const label = target.exists ? target.name : kind === "home" ? t("UI.Residence.Choose.Home", "Choose a residence") : t("UI.Residence.Choose.Workplace", "Choose a City Hall");
   const emptyLabel = kind === "home"
-    ? "No low-density residences found"
-    : "No City Hall assets found";
+    ? t("UI.Residence.Empty.Home", "No low-density residences found")
+    : t("UI.Residence.Empty.Workplace", "No City Hall assets found");
   const tooltip = kind === "home"
-    ? "Choose the low-density residential building where the mayor should live."
-    : "Choose the City Hall asset where the mayor should work.";
+    ? t("UI.Residence.Dropdown.Home.Tooltip", "Choose the low-density residential building where the mayor should live.")
+    : t("UI.Residence.Dropdown.Workplace.Tooltip", "Choose the City Hall asset where the mayor should work.");
 
   if (choices.length === 0) {
     return (
@@ -1297,7 +1768,7 @@ function MayorChoiceDropdown(props: {
           })}
           {choicesLimited && (
             <div className={styles.residenceDropdownHint}>
-              More eligible buildings exist. Select one in the city to add it here.
+              {t("UI.Residence.Dropdown.Limited", "More eligible buildings exist. Select one in the city to add it here.")}
             </div>
           )}
         </div>
@@ -1310,106 +1781,78 @@ function MayorChoiceDropdown(props: {
   );
 }
 
-function MayorSection(props: { panel: ElectionPanel }): ReactElement {
-  const { panel } = props;
+function MayorSection(props: { panel: ElectionPanel; candidates: Candidate[] }): ReactElement {
+  const { panel, candidates } = props;
   const [pickerActionKind, setPickerActionKind] = useState<CandidateTargetActionKind | null>(null);
   const activeCandidateField = hasActiveCandidateField(panel);
-  const candidateAName = panel.candidateA?.name || "Candidate A";
-  const candidateBName = panel.candidateB?.name || "Candidate B";
-  const candidateTargets = [panel.candidateA, panel.candidateB].filter((candidate): candidate is Candidate => Boolean(candidate?.exists));
-  const endorsedName = panel.endorsedCandidateIndex === 0
-    ? candidateAName
-    : panel.endorsedCandidateIndex === 1
-      ? candidateBName
-      : "a candidate";
-  const tamperBeneficiaryName = panel.voteTamperingCandidateIndex === 0
-    ? candidateAName
-    : panel.voteTamperingCandidateIndex === 1
-      ? candidateBName
-      : "a candidate";
+  const candidateTargets = candidates.filter((candidate): candidate is Candidate => Boolean(candidate?.exists));
+  const endorsedName = getCandidateNameByIndex(candidateTargets, panel.endorsedCandidateIndex);
+  const tamperBeneficiaryName = getCandidateNameByIndex(candidateTargets, panel.voteTamperingCandidateIndex);
   const bribeStatus = panel.bribeMeetingPending
-    ? "Pending"
+    ? t("UI.Mayor.Pending", "Pending")
     : "";
-  const votingIdStatus = panel.votingIdProposalPending
-    ? "Pending"
-    : panel.votingIdLawPassed
-      ? "Passed"
-      : "";
   const mayorActions: MayorCampaignAction[] = [
     {
       kind: "bribe" as const,
-      title: "Platform meeting",
-      description: "The mayor will attempt to convince a selected candidate to soften their platform.",
-      buttonLabel: "Choose",
-      targetButtonLabel: "Bribe",
+      title: t("UI.Mayor.Action.PlatformMeeting.Title", "Platform meeting"),
+      description: t("UI.Mayor.Action.PlatformMeeting.Description", "The mayor will attempt to convince a selected candidate to soften their platform."),
+      buttonLabel: t("UI.Mayor.Action.Choose", "Choose"),
+      targetButtonLabel: t("UI.Mayor.Action.Bribe", "Bribe"),
       status: bribeStatus,
       disabled: !panel.canBribe,
       requiresCandidate: true,
     },
     {
       kind: "endorse" as const,
-      title: "Mayor endorsement",
-      description: "Spend city funds to have the mayor endorse a selected candidate.",
-      buttonLabel: "Choose",
-      targetButtonLabel: "Endorse",
-      status: panel.endorsementUsed ? `Endorsed ${endorsedName}` : "",
+      title: t("UI.Mayor.Action.Endorsement.Title", "Mayor endorsement"),
+      description: t("UI.Mayor.Action.Endorsement.Description", "Spend city funds to have the mayor endorse a selected candidate."),
+      buttonLabel: t("UI.Mayor.Action.Choose", "Choose"),
+      targetButtonLabel: t("UI.Mayor.Action.Endorse", "Endorse"),
+      status: panel.endorsementUsed ? t("UI.Mayor.Action.EndorsedStatus", "Endorsed {name}", { name: endorsedName }) : "",
       disabled: !panel.canEndorse || panel.endorsementUsed,
       requiresCandidate: true,
     },
     {
       kind: "cashAssistance" as const,
       title: panel.cashAssistanceTurnoutBonusPercent > 0
-        ? "Cash Assistance funded"
-        : "Cash Assistance",
-      description: "Spend city funds to raise turnout for struggling and modest-income residents.",
-      buttonLabel: "Fund",
+        ? t("UI.Mayor.Action.CashAssistance.FundedTitle", "Cash Assistance funded")
+        : t("UI.Mayor.Action.CashAssistance.Title", "Cash Assistance"),
+      description: t("UI.Mayor.Action.CashAssistance.Description", "Spend city funds to raise turnout for struggling and modest-income residents."),
+      buttonLabel: t("UI.Mayor.Action.Fund", "Fund"),
       status: panel.cashAssistanceTurnoutBonusPercent > 0 ? `+${panel.cashAssistanceTurnoutBonusPercent}%` : "",
       disabled: !panel.canBribe || panel.cashAssistanceTurnoutBonusPercent > 0,
       requiresCandidate: false,
     },
     {
       kind: "tamper" as const,
-      title: "Vote-count tampering",
-      description: "Spend city funds to arrange a late election-day disruption for a selected candidate.",
-      buttonLabel: "Choose",
-      targetButtonLabel: "Tamper",
-      status: panel.voteTamperingScheduled ? `Planned for ${tamperBeneficiaryName}` : "",
+      title: t("UI.Mayor.Action.Tampering.Title", "Vote-count tampering"),
+      description: t("UI.Mayor.Action.Tampering.Description", "Spend city funds to arrange a late election-day disruption for a selected candidate."),
+      buttonLabel: t("UI.Mayor.Action.Choose", "Choose"),
+      targetButtonLabel: t("UI.Mayor.Action.Tamper", "Tamper"),
+      status: panel.voteTamperingScheduled ? t("UI.Mayor.Action.PlannedFor", "Planned for {name}", { name: tamperBeneficiaryName }) : "",
       disabled: !panel.canTamper || panel.voteTamperingScheduled,
       requiresCandidate: true,
     },
-    {
-      kind: "votingId" as const,
-      title: "Strict voting ID requirements",
-      description: "It would reduce turnout for uneducated workers.",
-      buttonLabel: "Propose",
-      status: votingIdStatus,
-      disabled: !panel.canProposeVotingId || panel.votingIdLawPassed || panel.votingIdProposalPending,
-      requiresCandidate: false,
-    },
   ];
-  const getActionUnavailableReason = (kind: "bribe" | "endorse" | "cashAssistance" | "tamper" | "votingId"): string => kind === "endorse" && panel.endorsementUsed
-    ? `The mayor already endorsed ${endorsedName} this election cycle.`
+  const getActionUnavailableReason = (kind: "bribe" | "endorse" | "cashAssistance" | "tamper"): string => kind === "endorse" && panel.endorsementUsed
+    ? t("UI.Mayor.Unavailable.Endorsed", "The mayor already endorsed {name} this election cycle.", { name: endorsedName })
     : kind === "cashAssistance" && panel.cashAssistanceTurnoutBonusPercent > 0
-      ? "Cash Assistance is already funded this election cycle."
+      ? t("UI.Mayor.Unavailable.CashAssistance", "Cash Assistance is already funded this election cycle.")
     : kind === "tamper" && panel.voteTamperingScheduled
-      ? `A vote-count operation is already planned for ${tamperBeneficiaryName} this election cycle.`
-    : kind === "votingId" && panel.votingIdLawPassed
-      ? "The stricter voting ID proposal has already passed for this election cycle."
-    : kind === "votingId" && panel.votingIdProposalPending
-      ? "The mayor is waiting for the voting ID proposal outcome."
+      ? t("UI.Mayor.Unavailable.Tampering", "A vote-count operation is already planned for {name} this election cycle.", { name: tamperBeneficiaryName })
     : panel.stage === "Voting"
-    ? "Mayor campaign actions are unavailable on election day."
+    ? t("UI.Mayor.Unavailable.ElectionDay", "Mayor campaign actions are unavailable on election day.")
     : panel.bribeMeetingPending
-      ? "The mayor is trying to schedule this candidate meeting."
+      ? t("UI.Mayor.Unavailable.MeetingPending", "The mayor is trying to schedule this candidate meeting.")
       : panel.bribeBlocked || panel.bribeUsedToday
-        ? "The mayor's schedule is blocked after today's campaign action."
+        ? t("UI.Mayor.Unavailable.ScheduleBlocked", "The mayor's schedule is blocked after today's campaign action.")
         : panel.waitingForPopulation
-          ? "Mayor campaign actions unlock when Elections start."
+          ? t("UI.Mayor.Unavailable.WaitingPopulation", "Mayor campaign actions unlock when Elections start.")
           : !activeCandidateField
-          ? "There are no candidates right now."
+          ? t("UI.Mayor.Unavailable.NoCandidates", "There are no candidates right now.")
           : !panel.donationsOpen
-            ? "Mayor campaign actions are available during the campaign before election day."
-            : "Mayor campaign action unavailable right now.";
+            ? t("UI.Mayor.Unavailable.Closed", "Mayor campaign actions are available during the campaign before election day.")
+            : t("UI.Mayor.Unavailable.Generic", "Mayor campaign action unavailable right now.");
   const runCandidateAction = (kind: CandidateTargetActionKind, candidateIndex: number) => {
     trigger(
       mod.id,
@@ -1427,8 +1870,8 @@ function MayorSection(props: { panel: ElectionPanel }): ReactElement {
     <section className={styles.mayorCard}>
       <div className={styles.mayorHeader}>
         <Tooltip tooltip={panel.mayorTemporary
-          ? "Temporary mayor selected from real citizens. This mayor applies no city effects and supervises the transition until an election is completed."
-          : "Current elected mayor and active mayoral platform."}
+          ? t("UI.Mayor.Portrait.Tooltip.Temporary", "Temporary mayor selected from real citizens. This mayor applies no city effects and supervises the transition until an election is completed.")
+          : t("UI.Mayor.Portrait.Tooltip.Current", "Current elected mayor and active mayoral platform.")}
         >
           <img
             className={styles.mayorPortrait}
@@ -1437,10 +1880,10 @@ function MayorSection(props: { panel: ElectionPanel }): ReactElement {
           />
         </Tooltip>
         <div className={styles.mayorTitle}>
-          <Tooltip tooltip="The citizen currently serving as mayor. Click the name to move the camera to this citizen.">
-            <span>Current mayor</span>
+          <Tooltip tooltip={t("UI.Mayor.Name.Label.Tooltip", "The citizen currently serving as mayor. Click the name to move the camera to this citizen.")}>
+            <span>{t("UI.Mayor.Name.Label", "Current mayor")}</span>
           </Tooltip>
-          <Tooltip tooltip="Click the mayor name to move the camera to this citizen.">
+          <Tooltip tooltip={t("UI.Mayor.Name.Tooltip", "Click the mayor name to move the camera to this citizen.")}>
             <Button
               variant="flat"
               className={styles.mayorNameLink}
@@ -1454,30 +1897,29 @@ function MayorSection(props: { panel: ElectionPanel }): ReactElement {
               {panel.mayorName}
             </Button>
           </Tooltip>
+          {panel.mayorPartyName && (
+            <Tooltip tooltip={t("UI.Mayor.PartyReputation.Tooltip", "Party reputation: {reputation}/100.", { reputation: panel.mayorPartyReputation })}>
+              <div className={styles.candidatePartyLine}>
+                <span className={styles.partySwatchSmall} style={{ backgroundColor: normalizeHexColor(panel.mayorPartyColor) || getCandidateColor(panel.mayorPartyIndex) }} />
+                <span>{panel.mayorPartyName}</span>
+              </div>
+            </Tooltip>
+          )}
         </div>
       </div>
-      {panel.mayorTagName && (
-        <Tooltip tooltip={panel.mayorTagDescription || panel.mayorTagName}>
-          <div className={`${styles.candidateTag} ${tagToneClass(panel.mayorTagTone)}`}>
-            <span>{panel.mayorTagName}</span>
-            <strong>{panel.mayorTagDescription}</strong>
-          </div>
-        </Tooltip>
-      )}
-      <Tooltip tooltip="Current mayoral platform and city effect. Temporary transition mayors apply no city modifiers.">
+      <Tooltip tooltip={t("UI.Mayor.Platform.Tooltip", "Current mayoral platform and city effect. Temporary transition mayors apply no city modifiers.")}>
         <div className={styles.mayorPlatform}>
           <span>{panel.mayorEffectName}</span>
           <PlatformImpactList impacts={panel.mayorPlatformImpacts ?? []} />
-          <p>{panel.mayorEffectDescription}</p>
         </div>
       </Tooltip>
       <div className={styles.bribeBlock}>
         <div className={styles.sectionHeader}>
-          <Tooltip tooltip="Mayor campaign actions are available before election day.">
-            <span>Mayor campaign actions</span>
+          <Tooltip tooltip={t("UI.Mayor.Actions.Header.Tooltip", "Mayor campaign actions are available before election day.")}>
+            <span>{t("UI.Mayor.Actions.Header", "Mayor campaign actions")}</span>
           </Tooltip>
-          <Tooltip tooltip="Each mayor campaign action uses the current mayor campaign action cost.">
-            <strong>{formatAmount(panel.bribeCost || 5000000)} each</strong>
+          <Tooltip tooltip={t("UI.Mayor.Actions.Cost.Tooltip", "Each mayor campaign action uses the current mayor campaign action cost.")}>
+            <strong>{t("UI.Each", "{amount} each", { amount: formatAmount(panel.bribeCost || 5000000) })}</strong>
           </Tooltip>
         </div>
         <div className={styles.mayorActionList}>
@@ -1512,7 +1954,7 @@ function MayorSection(props: { panel: ElectionPanel }): ReactElement {
                       </div>
                     </Tooltip>
                     {action.status && (
-                      <Tooltip tooltip="Current state of this mayor campaign action.">
+                      <Tooltip tooltip={t("UI.Mayor.Actions.Status.Tooltip", "Current state of this mayor campaign action.")}>
                         <strong className={styles.mayorActionStatus}>{action.status}</strong>
                       </Tooltip>
                     )}
@@ -1527,9 +1969,6 @@ function MayorSection(props: { panel: ElectionPanel }): ReactElement {
                         if (actionEnabled) {
                           if (action.requiresCandidate && isCandidateTargetAction(action.kind)) {
                             setPickerActionKind(isPicking ? null : action.kind);
-                          } else if (action.kind === "votingId") {
-                            trigger(mod.id, "proposeVotingIdLaw");
-                            setPickerActionKind(null);
                           } else if (action.kind === "cashAssistance") {
                             trigger(mod.id, "cashAssistance");
                             setPickerActionKind(null);
@@ -1537,7 +1976,7 @@ function MayorSection(props: { panel: ElectionPanel }): ReactElement {
                         }
                       }}
                     >
-                      <strong>{actionEnabled ? action.buttonLabel : "Unavailable"}</strong>
+                      <strong>{actionEnabled ? action.buttonLabel : t("UI.Unavailable", "Unavailable")}</strong>
                     </Button>
                   </Tooltip>
                 </article>
@@ -1570,13 +2009,13 @@ function CandidateActionPicker(props: {
           <span className={styles.candidatePickerTitle}>{getCandidatePickerTitle(action.kind)}</span>
           <span className={styles.candidatePickerDescription}>{action.description}</span>
         </div>
-        <Tooltip tooltip="Close candidate picker.">
+        <Tooltip tooltip={t("UI.Mayor.Picker.Close.Tooltip", "Close candidate picker.")}>
           <Button
             variant="flat"
             className={styles.candidatePickerClose}
             onSelect={onClose}
           >
-            <strong>X</strong>
+            <strong>{t("UI.Close", "X")}</strong>
           </Button>
         </Tooltip>
       </div>
@@ -1591,7 +2030,7 @@ function CandidateActionPicker(props: {
             <div className={styles.candidatePickerInfo}>
               <span className={styles.candidatePickerName}>{candidate.name}</span>
               <span className={styles.candidatePickerMeta}>
-                {candidate.tagName || "Candidate"} - {candidate.effectName || "No platform"}
+                {candidate.tagName || t("UI.Mayor.Picker.CandidateFallback", "Candidate")} - {candidate.effectName || t("UI.Mayor.Picker.NoPlatform", "No platform")}
               </span>
             </div>
             <Button
@@ -1603,7 +2042,7 @@ function CandidateActionPicker(props: {
             </Button>
           </article>
         )) : (
-          <div className={styles.candidatePickerEmpty}>No active candidates right now.</div>
+          <div className={styles.candidatePickerEmpty}>{t("UI.Mayor.Picker.Empty", "No active candidates right now.")}</div>
         )}
       </div>
     </div>
@@ -1613,31 +2052,356 @@ function CandidateActionPicker(props: {
 function getCandidatePickerTitle(kind: MayorActionKind): string {
   switch (kind) {
     case "bribe":
-      return "Choose platform meeting target";
+      return t("UI.Mayor.Picker.Title.Bribe", "Choose platform meeting target");
     case "endorse":
-      return "Choose endorsement target";
+      return t("UI.Mayor.Picker.Title.Endorse", "Choose endorsement target");
     case "tamper":
-      return "Choose vote-count target";
+      return t("UI.Mayor.Picker.Title.Tamper", "Choose vote-count target");
     default:
-      return "Choose candidate";
+      return t("UI.Mayor.Picker.Title.Candidate", "Choose candidate");
   }
+}
+
+function PartiesSection(props: { panel: ElectionPanel; onEditorOpenChange: (open: boolean) => void }): ReactElement {
+  const parties = Array.isArray(props.panel.parties) ? props.panel.parties : [];
+  const partyTags = Array.isArray(props.panel.partyTags) ? props.panel.partyTags : [];
+  const [editingPartyIndex, setEditingPartyIndex] = useState<number | null>(null);
+  const editingParty = editingPartyIndex === null
+    ? undefined
+    : parties.find((party) => party.index === editingPartyIndex);
+  const editorOpen = !!editingParty;
+
+  useEffect(() => {
+    if (editingPartyIndex !== null && !parties.some((party) => party.index === editingPartyIndex)) {
+      setEditingPartyIndex(null);
+    }
+  }, [editingPartyIndex, parties]);
+
+  useEffect(() => {
+    props.onEditorOpenChange(editorOpen);
+  }, [editorOpen, props.onEditorOpenChange]);
+
+  useEffect(() => () => props.onEditorOpenChange(false), [props.onEditorOpenChange]);
+
+  if (parties.length === 0) {
+    return <div className={styles.notice}>{t("UI.Notice.NoParties", "No parties are active right now.")}</div>;
+  }
+
+  return (
+    <section className={editorOpen ? `${styles.partyPanel} ${styles.partyPanelEditing}` : styles.partyPanel}>
+      <div className={styles.partyGrid}>
+        {parties.map((party) => (
+          <PartyCard party={party} key={party.index} onEditTags={setEditingPartyIndex} />
+        ))}
+      </div>
+      {editingParty && (
+        <PartyTagEditorPanel
+          party={editingParty}
+          partyTags={partyTags}
+          onCancel={() => setEditingPartyIndex(null)}
+        />
+      )}
+    </section>
+  );
+}
+
+function PartyCard(props: { party: Party; onEditTags: (partyIndex: number) => void }): ReactElement {
+  const { party } = props;
+  const ColorField = resolveVanillaColorField();
+  const [name, setName] = useState(party.name);
+  const [color, setColor] = useState(normalizeHexColor(party.color) || getCandidateColor(party.index));
+  const displayColor = normalizeHexColor(color) || getCandidateColor(party.index);
+
+  useEffect(() => {
+    setName(party.name);
+    setColor(normalizeHexColor(party.color) || getCandidateColor(party.index));
+  }, [party.index, party.name, party.color]);
+
+  const saveDisabled = name.trim() === party.name && normalizeHexColor(color) === normalizeHexColor(party.color);
+
+  return (
+    <article className={styles.partyCard} style={{ borderColor: displayColor, boxShadow: `inset 0 0 0 1rem ${hexToRgba(displayColor, 0.18)}` }}>
+      <div className={styles.partyCardHeader}>
+        <div className={styles.partyColorPickerFrame} style={{ borderColor: hexToRgba(displayColor, 0.6) }}>
+          {ColorField ? (
+            <ColorField
+              value={hexToColor(displayColor)}
+              alpha={false}
+              className={styles.partyColorField}
+              onChange={(nextColor) => setColor(colorToHex(nextColor))}
+            />
+          ) : (
+            <input
+              className={styles.partyColorFallbackInput}
+              value={color}
+              maxLength={7}
+              onChange={(event) => setColor(event.currentTarget.value)}
+            />
+          )}
+        </div>
+        <div className={styles.partyTitleBlock}>
+          <input
+            className={styles.partyNameInput}
+            value={name}
+            maxLength={48}
+            onChange={(event) => setName(event.currentTarget.value)}
+          />
+        </div>
+        <Tooltip tooltip={saveDisabled ? t("UI.Party.Save.Tooltip.Disabled", "No party changes to save.") : t("UI.Party.Save.Tooltip.Enabled", "Save this party name and color.")}>
+          <Button
+            variant="flat"
+            className={saveDisabled ? `${styles.partySaveButton} ${styles.partySaveButtonDisabled}` : styles.partySaveButton}
+            disabled={saveDisabled}
+            onSelect={() => {
+              if (saveDisabled) {
+                return;
+              }
+
+              trigger(mod.id, "renameParty", party.index, name.trim());
+              trigger(mod.id, "setPartyColor", party.index, normalizeHexColor(color) || displayColor);
+            }}
+          >
+            <strong>{t("UI.Save", "Save")}</strong>
+          </Button>
+        </Tooltip>
+      </div>
+
+      <div className={styles.partyStatsLine}>
+        <Tooltip tooltip={t("UI.Party.Reputation.Tooltip", "Persistent party reputation from 0 to 100.")}>
+          <span><strong>{t("UI.Party.Reputation.Label", "Reputation:")}</strong> {party.reputation}</span>
+        </Tooltip>
+        <Tooltip tooltip={t("UI.Party.Wins.Tooltip", "Total elections won by this party.")}>
+          <span><strong>{t("UI.Party.Wins.Label", "Wins:")}</strong> {party.wins}</span>
+        </Tooltip>
+        <Tooltip tooltip={t("UI.Party.Terms.Tooltip", "Current consecutive terms in power.")}>
+          <span><strong>{t("UI.Party.Terms.Label", "Terms:")}</strong> {party.consecutiveTerms}</span>
+        </Tooltip>
+      </div>
+
+      <div className={styles.partyTagList}>
+        {party.tags.map((tag) => (
+          <div className={styles.partyTagRow} key={`${party.index}-${tag.id}`}>
+            <PartyTagBadge tag={tag} />
+          </div>
+        ))}
+      </div>
+
+      <Tooltip tooltip={party.canReplaceTag ? t("UI.Party.Replace.Tooltip.Enabled", "Open the party tag editor.") : party.replacementDisabledReason || t("UI.Party.Replace.Tooltip.Disabled", "Party tag replacement is unavailable right now.")}>
+        <Button
+          variant="flat"
+          className={party.canReplaceTag ? styles.partyReplaceAllButton : `${styles.partyReplaceAllButton} ${styles.partySaveButtonDisabled}`}
+          disabled={!party.canReplaceTag}
+          onSelect={() => {
+            if (party.canReplaceTag) {
+              props.onEditTags(party.index);
+            }
+          }}
+        >
+          <strong>{t("UI.Party.Replace", "Replace Tags")}</strong>
+        </Button>
+      </Tooltip>
+    </article>
+  );
+}
+
+function PartyTagEditorPanel(props: { party: Party; partyTags: PartyTag[]; onCancel: () => void }): ReactElement {
+  const { party, partyTags } = props;
+  const availableTags = partyTags.filter((tag) => tag.id > 0);
+  const initialTagIds = party.tags.map((tag) => tag.id).filter((id) => id > 0);
+  const [selectedIds, setSelectedIds] = useState<number[]>(initialTagIds);
+  const selectedTags = selectedIds
+    .map((id) => findPartyTagById(availableTags, id))
+    .filter((tag): tag is PartyTag => !!tag);
+  const selectedTotal = selectedTags.reduce((total, tag) => total + tag.value, 0);
+  const unchanged = haveSameTagSet(selectedIds, initialTagIds);
+  const canSave = party.canReplaceTag && selectedIds.length === 3 && selectedTotal === 0 && !unchanged;
+  const saveTooltip = !party.canReplaceTag
+    ? party.replacementDisabledReason || t("UI.Party.TagEditor.Save.Tooltip.Disabled", "Party tag replacement is unavailable right now.")
+    : selectedIds.length !== 3
+      ? t("UI.Party.TagEditor.Save.Tooltip.Count", "Select exactly three party tags.")
+      : selectedTotal !== 0
+        ? t("UI.Party.TagEditor.Save.Tooltip.Total", "Party tag values must add up to zero.")
+        : unchanged
+          ? t("UI.Party.TagEditor.Save.Tooltip.Unchanged", "Choose a different party tag set.")
+          : t("UI.Party.TagEditor.Save.Tooltip.Ready", "Save these party tags.");
+
+  useEffect(() => {
+    setSelectedIds(initialTagIds);
+  }, [party.index]);
+
+  const toggleTag = (tag: PartyTag) => {
+    setSelectedIds((current) => {
+      if (current.includes(tag.id)) {
+        return current.filter((id) => id !== tag.id);
+      }
+
+      if (current.length >= 3) {
+        return current;
+      }
+
+      return [...current, tag.id];
+    });
+  };
+
+  return (
+    <section className={styles.partyTagEditorPanel}>
+      <div className={styles.partyTagEditorHeader}>
+        <div>
+          <strong>{party.name}</strong>
+          <span>{t("UI.Party.TagEditor.Instructions", "Select three party tags. The total must be 0.")}</span>
+        </div>
+        <div className={styles.partyTagEditorTotal}>
+          <span>{t("UI.Total", "Total")}</span>
+          <strong className={tagTotalClass(selectedTotal)}>{formatTagValue(selectedTotal)}</strong>
+        </div>
+      </div>
+
+      <div className={styles.partyTagEditorSelectedList}>
+        {selectedTags.map((tag) => (
+          <Button
+            variant="flat"
+            className={`${styles.partySelectedTagButton} ${tagValueClass(tag.value)}`}
+            key={`selected-${tag.id}`}
+            onSelect={() => toggleTag(tag)}
+          >
+            <span>{tag.name}</span>
+            <strong>{formatTagValue(tag.value)}</strong>
+          </Button>
+        ))}
+        {Array.from({ length: Math.max(0, 3 - selectedTags.length) }).map((_, index) => (
+          <div className={styles.partySelectedTagPlaceholder} key={`placeholder-${index}`}>
+            {t("UI.Empty", "Empty")}
+          </div>
+        ))}
+      </div>
+
+      <div className={styles.partyTagOptionGrid}>
+        {availableTags.map((tag) => {
+          const selected = selectedIds.includes(tag.id);
+          const full = selectedIds.length >= 3 && !selected;
+          return (
+            <Tooltip tooltip={full ? t("UI.Party.TagEditor.Full.Tooltip", "Remove a selected tag before choosing another.") : tag.description || tag.name} key={tag.id}>
+              <Button
+                variant="flat"
+                className={`${styles.partyTagOption} ${tagValueClass(tag.value)} ${selected ? styles.partyTagOptionSelected : ""} ${full ? styles.partyTagOptionBlocked : ""}`}
+                onSelect={() => {
+                  if (!full) {
+                    toggleTag(tag);
+                  }
+                }}
+              >
+                <span>{tag.name}</span>
+                <strong>{formatTagValue(tag.value)}</strong>
+              </Button>
+            </Tooltip>
+          );
+        })}
+      </div>
+
+      <div className={styles.partyTagEditorActions}>
+        <Button variant="flat" className={styles.partyTagEditorButton} onSelect={props.onCancel}>
+          <strong>{t("UI.Cancel", "Cancel")}</strong>
+        </Button>
+        <Tooltip tooltip={saveTooltip}>
+          <Button
+            variant="flat"
+            className={canSave ? styles.partyTagEditorButton : `${styles.partyTagEditorButton} ${styles.partySaveButtonDisabled}`}
+            disabled={!canSave}
+            onSelect={() => {
+              if (canSave) {
+                trigger(mod.id, "setPartyTags", party.index, selectedIds.join(","));
+                props.onCancel();
+              }
+            }}
+          >
+            <strong>{t("UI.Save", "Save")}</strong>
+          </Button>
+        </Tooltip>
+      </div>
+    </section>
+  );
+}
+
+function PartyTagBadge(props: { tag: PartyTag }): ReactElement {
+  const { tag } = props;
+  const valueText = formatTagValue(tag.value);
+  return (
+    <Tooltip tooltip={tag.description || tag.name}>
+      <div className={`${styles.partyTagBadge} ${tagToneClass(tag.tone)}`}>
+        <span>{tag.name}</span>
+        <strong>{valueText}</strong>
+      </div>
+    </Tooltip>
+  );
+}
+
+function findPartyTagById(tags: PartyTag[], id: number): PartyTag | undefined {
+  return tags.find((tag) => tag.id === id);
+}
+
+function formatTagValue(value: number): string {
+  return value > 0 ? `+${value}` : `${value}`;
+}
+
+function haveSameTagSet(first: number[], second: number[]): boolean {
+  if (first.length !== second.length) {
+    return false;
+  }
+
+  return first.every((id) => second.includes(id));
+}
+
+function tagValueClass(value: number): string {
+  if (value > 0) {
+    return styles.partyTagValuePositive;
+  }
+
+  if (value < 0) {
+    return styles.partyTagValueNegative;
+  }
+
+  return styles.partyTagValueNeutral;
+}
+
+function tagTotalClass(value: number): string {
+  if (value === 0) {
+    return styles.partyTagTotalBalanced;
+  }
+
+  return value > 0 ? styles.partyTagTotalPositive : styles.partyTagTotalNegative;
 }
 
 function CandidateCard(props: {
   candidate: Candidate;
   donationTiers: DonationTier[];
   donationsOpen: boolean;
+  canDonate: boolean;
+  donationUsedToday: boolean;
 }): ReactElement {
-  const { candidate, donationTiers, donationsOpen } = props;
-  const canDonate = donationsOpen && candidate.exists;
+  const { candidate, donationTiers, donationsOpen, donationUsedToday } = props;
+  const canDonate = props.canDonate && candidate.exists;
   const tiers = Array.isArray(donationTiers) ? donationTiers : [];
   const donationTier = tiers[0];
   const donationCost = candidate.donationCost || donationTier?.amount || 0;
+  const displayColor = getCandidateDisplayColor(candidate);
+  const donationTooltip = !candidate.exists
+    ? t("UI.Candidate.Donation.Tooltip.NoCandidate", "No candidate is available for donations.")
+    : donationUsedToday
+      ? t("UI.Candidate.Donation.Tooltip.UsedToday", "Only one campaign donation can be made per day.")
+      : !donationsOpen
+        ? t("UI.Candidate.Donation.Tooltip.Closed", "Donations are available when an active campaign has selected candidates before election day.")
+        : t("UI.Candidate.Donation.Tooltip.Ready", "Donate {amount} of city funds to support this candidate's campaign before election day.", { amount: formatAmount(donationCost) });
 
   return (
-    <article className={`${styles.candidateCard} ${candidate.index === 0 ? styles.candidateCardA : styles.candidateCardB}`}>
+    <article
+      className={styles.candidateCard}
+      style={{
+        borderColor: getCandidateBorderColor(candidate),
+        boxShadow: `inset 0 0 0 1rem ${getCandidateShadowColor(candidate)}`,
+      }}
+    >
       <div className={styles.candidateHeader}>
-        <Tooltip tooltip="Candidate portrait. Candidates are selected from real adult residents.">
+        <Tooltip tooltip={t("UI.Candidate.Portrait.Tooltip", "Candidate portrait. Candidates are selected from real adult residents.")}>
           <img
             className={styles.portrait}
             src={candidate.portrait || icon}
@@ -1645,7 +2409,7 @@ function CandidateCard(props: {
           />
         </Tooltip>
         <div className={styles.candidateTitle}>
-          <Tooltip tooltip="Click the candidate name to move the camera to this citizen.">
+          <Tooltip tooltip={t("UI.Candidate.Name.Tooltip", "Click the candidate name to move the camera to this citizen.")}>
             <Button
               variant="flat"
               className={styles.candidateNameLink}
@@ -1660,8 +2424,16 @@ function CandidateCard(props: {
             </Button>
           </Tooltip>
           {candidate.bio && (
-            <Tooltip tooltip="Candidate background generated from the resident's current life in the city.">
+            <Tooltip tooltip={t("UI.Candidate.Bio.Tooltip", "Candidate background generated from the resident's current life in the city.")}>
               <div className={styles.candidateBio}>{candidate.bio}</div>
+            </Tooltip>
+          )}
+          {candidate.partyName && (
+            <Tooltip tooltip={t("UI.Mayor.PartyReputation.Tooltip", "Party reputation: {reputation}/100.", { reputation: candidate.partyReputation })}>
+              <div className={styles.candidatePartyLine}>
+                <span className={styles.partySwatchSmall} style={{ backgroundColor: displayColor }} />
+                <span>{candidate.partyName}</span>
+              </div>
             </Tooltip>
           )}
         </div>
@@ -1676,29 +2448,29 @@ function CandidateCard(props: {
         </Tooltip>
       )}
 
-      <Tooltip tooltip="Effective campaign support credited to this candidate during the current campaign. Some tags can change cost or campaign effect.">
+      <Tooltip tooltip={t("UI.Candidate.DonationTotal.Tooltip", "Effective campaign support credited to this candidate during the current campaign. Some tags can change cost or campaign effect.")}>
         <div className={styles.donationTotal}>
-          <span>Total donations</span>
+          <span>{t("UI.Candidate.DonationTotal", "Total donations")}</span>
           <strong>{formatAmount(candidate.donationAmount)}</strong>
         </div>
       </Tooltip>
 
-      <Tooltip tooltip="Candidate platform. The positive effect is shown first, followed by the tradeoff.">
+      <Tooltip tooltip={t("UI.Candidate.Platform.Tooltip", "Candidate platform. The positive effect is shown first, followed by the tradeoff.")}>
         <div className={styles.platform}>
-          <span>Candidate Platform</span>
+          <span>{t("UI.Candidate.Platform", "Candidate Platform")}</span>
           <PlatformImpactList impacts={candidate.platformImpacts ?? []} />
         </div>
       </Tooltip>
 
       <div className={styles.donationBlock}>
         <div className={styles.donationHeader}>
-          <Tooltip tooltip="City-funded campaign support. Donations are available while the mayoral race is active before election day.">
-            <span>Campaign donation</span>
+          <Tooltip tooltip={t("UI.Candidate.DonationHeader.Tooltip", "City-funded campaign support. Donations are available while the mayoral race is active before election day.")}>
+            <span>{t("UI.Candidate.DonationHeader", "Campaign donation")}</span>
           </Tooltip>
         </div>
         {donationTier && (
           <Tooltip
-            tooltip={`Donate ${formatAmount(donationCost)} of city funds to support this candidate's campaign before election day.`}
+            tooltip={donationTooltip}
           >
             <Button
               variant="flat"
@@ -1711,13 +2483,18 @@ function CandidateCard(props: {
                 }
               }}
             >
-              <strong>Donate {formatAmount(donationCost)}</strong>
+              <strong>{t("UI.Candidate.Donate", "Donate {amount}", { amount: formatAmount(donationCost) })}</strong>
             </Button>
           </Tooltip>
         )}
         {!donationsOpen && (
-          <Tooltip tooltip="Donations are available when an active campaign has selected candidates before election day.">
-            <div className={styles.helpText}>Donations open before election day once candidates are selected.</div>
+          <Tooltip tooltip={t("UI.Candidate.Donation.Tooltip.Closed", "Donations are available when an active campaign has selected candidates before election day.")}>
+            <div className={styles.helpText}>{t("UI.Candidate.DonationsClosed.Help", "Donations open before election day once candidates are selected.")}</div>
+          </Tooltip>
+        )}
+        {donationsOpen && donationUsedToday && (
+          <Tooltip tooltip={t("UI.Candidate.Donation.Tooltip.UsedToday", "Only one campaign donation can be made per day.")}>
+            <div className={styles.helpText}>{t("UI.Candidate.DonationUsed.Help", "A campaign donation has already been made today.")}</div>
           </Tooltip>
         )}
       </div>
@@ -1758,6 +2535,72 @@ function tagToneClass(tone: string): string {
   return styles.candidateTagNeutral;
 }
 
+function getPollCandidateResults(poll: PollResult, candidates: Candidate[]): PollCandidateResult[] {
+  const sourceResults = Array.isArray(poll.candidateResults) ? poll.candidateResults : [];
+  const activeCandidates = Array.isArray(candidates) ? candidates : [];
+
+  if (activeCandidates.length > 0) {
+    return activeCandidates.map((candidate) => {
+      const result = sourceResults.find((item) => item.index === candidate.index);
+      return {
+        index: candidate.index,
+        name: candidate.name || result?.name || getCandidateFallbackName(candidate.index),
+        votes: result?.votes ?? getLegacyPollVotes(poll, candidate.index),
+        percent: result?.percent ?? getLegacyPollPercent(poll, candidate.index),
+      };
+    });
+  }
+
+  if (sourceResults.length > 0) {
+    return sourceResults;
+  }
+
+  return [
+    {
+      index: 0,
+      name: getCandidateFallbackName(0),
+      votes: poll.votesA,
+      percent: poll.percentA,
+    },
+    {
+      index: 1,
+      name: getCandidateFallbackName(1),
+      votes: poll.votesB,
+      percent: poll.percentB,
+    },
+  ];
+}
+
+function getLegacyPollVotes(poll: PollResult, candidateIndex: number): number {
+  switch (candidateIndex) {
+    case 0:
+      return poll.votesA;
+    case 1:
+      return poll.votesB;
+    case 2:
+      return poll.votesC;
+    case 3:
+      return poll.votesD;
+    default:
+      return 0;
+  }
+}
+
+function getLegacyPollPercent(poll: PollResult, candidateIndex: number): number {
+  switch (candidateIndex) {
+    case 0:
+      return poll.percentA;
+    case 1:
+      return poll.percentB;
+    case 2:
+      return poll.percentC;
+    case 3:
+      return poll.percentD;
+    default:
+      return 0;
+  }
+}
+
 function PollRow(props: {
   label: string;
   value: number;
@@ -1767,7 +2610,7 @@ function PollRow(props: {
 
   return (
     <div className={styles.pollRow}>
-      <Tooltip tooltip={`Poll support for ${props.label}. This is based on the sampled residents, not final election turnout.`}>
+      <Tooltip tooltip={t("UI.Poll.Row.Tooltip", "Poll support for {label}. This is based on the sampled residents, not final election turnout.", { label: props.label })}>
         <div className={styles.pollRowTop}>
           <div className={styles.pollCandidate}>
             <span className={styles.pollSwatch} style={{ backgroundColor: props.color }} />
@@ -1796,18 +2639,22 @@ function formatAmount(value: number): string {
 
 function normalizePanel(panel: ElectionPanel | undefined | null): ElectionPanel {
   const source = panel ?? defaultPanel;
-  const candidateA = {
-    ...defaultPanel.candidateA,
-    ...(source.candidateA ?? {}),
-  };
-  const candidateB = {
-    ...defaultPanel.candidateB,
-    ...(source.candidateB ?? {}),
-  };
+  const candidateA = normalizeCandidate(source.candidateA ?? defaultPanel.candidateA, 0);
+  const candidateB = normalizeCandidate(source.candidateB ?? defaultPanel.candidateB, 1);
+  const candidates = Array.isArray(source.candidates) && source.candidates.length > 0
+    ? source.candidates.map((candidate, index) => normalizeCandidate(candidate, index))
+    : [candidateA, candidateB];
+  const parties = Array.isArray(source.parties)
+    ? source.parties.map((party, index) => normalizeParty(party, index))
+    : [];
+  const partyTags = Array.isArray(source.partyTags)
+    ? source.partyTags.map((tag, index) => normalizePartyTag(tag, index))
+    : [];
   const poll = {
     ...defaultPanel.poll,
     ...(source.poll ?? {}),
   };
+  poll.candidateResults = Array.isArray(poll.candidateResults) ? poll.candidateResults : [];
   poll.ageGroups = Array.isArray(poll.ageGroups) ? poll.ageGroups : [];
   poll.educationGroups = Array.isArray(poll.educationGroups) ? poll.educationGroups : [];
   poll.incomeGroups = Array.isArray(poll.incomeGroups) ? poll.incomeGroups : [];
@@ -1816,8 +2663,11 @@ function normalizePanel(panel: ElectionPanel | undefined | null): ElectionPanel 
     ...defaultPanel,
     ...source,
     poll,
+    candidates,
     candidateA,
     candidateB,
+    parties,
+    partyTags,
     mayorHome: {
       ...defaultPanel.mayorHome,
       ...(source.mayorHome ?? {}),
@@ -1836,6 +2686,7 @@ function normalizePanel(panel: ElectionPanel | undefined | null): ElectionPanel 
     },
     donationTiers: Array.isArray(source.donationTiers) ? source.donationTiers : [],
     supportPrograms: Array.isArray(source.supportPrograms) ? source.supportPrograms : [],
+    legislation: Array.isArray(source.legislation) ? source.legislation : [],
     mayorPlatformImpacts: Array.isArray(source.mayorPlatformImpacts) ? source.mayorPlatformImpacts : [],
   };
 }

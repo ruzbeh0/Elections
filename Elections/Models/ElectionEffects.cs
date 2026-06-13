@@ -194,8 +194,8 @@ namespace Elections.Models
             ElectionEffectDefinition definition = new ElectionEffectDefinition
             {
                 Id = id,
-                Name = "Mayoral Agenda",
-                Description = $"{positive.Sentence}, but {negative.Sentence}",
+                Name = ElectionLocalization.Translate("Model.Platform.Name", "Mayoral Agenda"),
+                Description = ElectionLocalization.Format("Model.Platform.Description", "{0}, but {1}", positive.Sentence, negative.Sentence),
                 PlatformKey = $"{positive.Key}:{positive.ValueText}|{negative.Key}:{negative.ValueText}",
                 PositiveImpact = positive,
                 NegativeImpact = negative,
@@ -233,10 +233,13 @@ namespace Elections.Models
         {
             int amount = option.Amounts[Pick(ref seed, option.Amounts.Length)];
             float effectiveAmount = amount * Math.Max(0f, amountScale);
+            string label = ElectionLocalization.Translate($"Model.Platform.{option.Key}.Label", option.Label);
+            string sentenceTarget = ElectionLocalization.Translate($"Model.Platform.{option.Key}.Target", option.SentenceTarget);
+            string verb = ElectionLocalization.Translate($"Model.Platform.Verb.{option.Verb}", option.Verb);
             ElectionEffectImpact impact = new ElectionEffectImpact
             {
                 Key = option.Key,
-                Label = option.Label,
+                Label = label,
                 Positive = positive,
                 ModifierType = (CityModifierType)(-1),
                 Add = 0f,
@@ -251,8 +254,8 @@ namespace Elections.Models
                 impact.MoneyDelta = signedMoneyAmount;
                 impact.ValueText = FormatSignedMoney(signedMoneyAmount);
                 impact.Sentence = option.Direction > 0
-                    ? $"{option.Verb} {effectiveMoneyAmount:n0} to {option.SentenceTarget}"
-                    : $"{option.Verb} {effectiveMoneyAmount:n0} from {option.SentenceTarget}";
+                    ? ElectionLocalization.Format("Model.Platform.Money.PositiveSentence", "{0} {1:n0} to {2}", verb, effectiveMoneyAmount, sentenceTarget)
+                    : ElectionLocalization.Format("Model.Platform.Money.NegativeSentence", "{0} {1:n0} from {2}", verb, effectiveMoneyAmount, sentenceTarget);
                 return impact;
             }
 
@@ -264,16 +267,21 @@ namespace Elections.Models
                 impact.AccumulatedXpMultiplier = Math.Max(0f, 1f + delta);
                 impact.ValueText = FormatMultiplier(impact.AccumulatedXpMultiplier);
                 if (option.Direction > 0 && Math.Abs(effectiveAmount - 100f) < 0.05f)
-                    impact.Sentence = $"doubles {option.SentenceTarget}";
+                    impact.Sentence = ElectionLocalization.Format("Model.Platform.DoubleSentence", "doubles {0}", sentenceTarget);
                 else if (option.Direction < 0 && Math.Abs(effectiveAmount - 50f) < 0.05f)
-                    impact.Sentence = $"cuts {option.SentenceTarget} in half";
+                    impact.Sentence = ElectionLocalization.Format("Model.Platform.HalfSentence", "cuts {0} in half", sentenceTarget);
                 else
-                    impact.Sentence = $"{(option.Direction > 0 ? "raises" : "lowers")} {option.SentenceTarget} by {FormatUnsignedPercent(effectiveAmount)}";
+                    impact.Sentence = ElectionLocalization.Format(
+                        "Model.Platform.PercentSentence",
+                        "{0} {1} by {2}",
+                        ElectionLocalization.Translate(option.Direction > 0 ? "Model.Platform.Verb.raises" : "Model.Platform.Verb.lowers", option.Direction > 0 ? "raises" : "lowers"),
+                        sentenceTarget,
+                        FormatUnsignedPercent(effectiveAmount));
                 return impact;
             }
 
             impact.ValueText = FormatSignedPercent(signedPercent);
-            impact.Sentence = $"{option.Verb} {option.SentenceTarget} by {FormatUnsignedPercent(effectiveAmount)}";
+            impact.Sentence = ElectionLocalization.Format("Model.Platform.PercentSentence", "{0} {1} by {2}", verb, sentenceTarget, FormatUnsignedPercent(effectiveAmount));
 
             if (option.Kind == ElectionEffectImpactKind.RealisticTripsResourceConsumption)
             {
@@ -291,9 +299,9 @@ namespace Elections.Models
             ElectionEffectImpact neutral = new ElectionEffectImpact
             {
                 Key = "None",
-                Label = "No platform",
+                Label = ElectionLocalization.Translate("Model.Platform.NoPlatform", "No platform"),
                 ValueText = string.Empty,
-                Sentence = "keeps city policy neutral",
+                Sentence = ElectionLocalization.Translate("Model.Platform.NeutralSentence", "keeps city policy neutral"),
                 ModifierType = (CityModifierType)(-1),
                 ResourceConsumptionMultiplier = 1f,
                 AccumulatedXpMultiplier = 1f
@@ -302,8 +310,8 @@ namespace Elections.Models
             return new ElectionEffectDefinition
             {
                 Id = 0,
-                Name = "Democratic Transition",
-                Description = "keeps city policy neutral while supervising the election process until residents elect a mayor",
+                Name = ElectionLocalization.Translate("Model.Platform.Transition.Name", "Democratic Transition"),
+                Description = ElectionLocalization.Translate("Model.Platform.Transition.Description", "keeps city policy neutral while supervising the election process until residents elect a mayor"),
                 PlatformKey = "None",
                 PositiveImpact = neutral,
                 NegativeImpact = neutral,

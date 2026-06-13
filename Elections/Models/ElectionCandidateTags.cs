@@ -1,4 +1,6 @@
+using Elections.Components;
 using Game.Citizens;
+using Unity.Entities;
 using Unity.Mathematics;
 
 namespace Elections.Models
@@ -13,17 +15,20 @@ namespace Elections.Models
 
     internal readonly struct ElectionCandidateTagDefinition
     {
+        private readonly string m_Name;
+        private readonly string m_Description;
+
         public ElectionCandidateTagDefinition(int id, string name, string description, ElectionCandidateTagTone tone)
         {
             Id = id;
-            Name = name;
-            Description = description;
+            m_Name = name;
+            m_Description = description;
             Tone = tone;
         }
 
         public int Id { get; }
-        public string Name { get; }
-        public string Description { get; }
+        public string Name => Id == ElectionCandidateTags.None ? string.Empty : ElectionLocalization.Translate($"Model.CandidateTag.{Id}.Name", m_Name);
+        public string Description => Id == ElectionCandidateTags.None ? string.Empty : ElectionLocalization.Translate($"Model.CandidateTag.{Id}.Description", m_Description);
         public ElectionCandidateTagTone Tone { get; }
     }
 
@@ -60,6 +65,7 @@ namespace Elections.Models
 
         public const int TagChancePercent = 75;
         public const int Count = 27;
+        private const int DoubleVoteEffectChancePercent = 25;
 
         private static readonly ElectionCandidateTagDefinition s_None = new ElectionCandidateTagDefinition(
             None,
@@ -113,6 +119,63 @@ namespace Elections.Models
         public static bool HasTag(int tagId)
         {
             return NormalizeId(tagId) != None;
+        }
+
+        public static string GetDescription(int tagId, int voteEffectMultiplier)
+        {
+            int multiplier = math.max(1, voteEffectMultiplier);
+            switch (NormalizeId(tagId))
+            {
+                case HumbleBeginnings:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.HumbleBeginnings", "+{0}% support from low-income residents.", Percent(10, multiplier));
+                case ControversialPast:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.ControversialPast", "-{0}% overall voter support.", Percent(10, multiplier));
+                case Scientist:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.Scientist", "+{0}% support from highly educated residents.", Percent(10, multiplier));
+                case Fundraiser:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.Fundraiser", "Campaign donations count 15% more, but low-income support drops by {0}%.", Percent(5, multiplier));
+                case PoorSpeaker:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.PoorSpeaker", "-{0}% overall voter support.", Percent(5, multiplier));
+                case Charismatic:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.Charismatic", "+{0}% overall voter support.", Percent(5, multiplier));
+                case UnionOrganizer:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.UnionOrganizer", "+{0}% support from workers.", Percent(10, multiplier));
+                case StudentFavorite:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.StudentFavorite", "+{0}% support from students and teen voters.", Percent(10, multiplier));
+                case ElderStatesperson:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.ElderStatesperson", "+{0}% support from elderly voters.", Percent(10, multiplier));
+                case YoungReformer:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.YoungReformer", "+{0}% support from teens and adults, -{1}% from elderly voters.", Percent(8, multiplier), Percent(4, multiplier));
+                case Technocrat:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.Technocrat", "+{0}% support from well educated residents, -{1}% from uneducated residents.", Percent(8, multiplier), Percent(5, multiplier));
+                case Populist:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.Populist", "+{0}% support from low-income residents, -{1}% from wealthy residents.", Percent(8, multiplier), Percent(5, multiplier));
+                case EliteConnections:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.EliteConnections", "+{0}% support from wealthy residents, -{1}% from low-income residents.", Percent(8, multiplier), Percent(5, multiplier));
+                case TransitAdvocate:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.TransitAdvocate", "+{0}% support from residents without cars.", Percent(10, multiplier));
+                case MotoristAdvocate:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.MotoristAdvocate", "+{0}% support from residents with cars.", Percent(10, multiplier));
+                case LawAndOrder:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.LawAndOrder", "+{0}% support from elderly and unhappy residents.", Percent(8, multiplier));
+                case Environmentalist:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.Environmentalist", "+{0}% support from students and well educated residents.", Percent(8, multiplier));
+                case BusinessFriendly:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.BusinessFriendly", "+{0}% support from workers and wealthy residents.", Percent(8, multiplier));
+                case NeighborhoodChampion:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.NeighborhoodChampion", "+{0}% support from low- and middle-income residents.", Percent(6, multiplier));
+                case Polarizing:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.Polarizing", "Election turnout increases by {0}%.", Percent(15, multiplier));
+                case Cautious:
+                    return ElectionLocalization.Format("Model.CandidateTag.Description.Cautious", "Halves this candidate's positive and negative platform effects, but reduces overall voter support by {0}%.", Percent(5, multiplier));
+                default:
+                    return Get(tagId).Description;
+            }
+        }
+
+        private static int Percent(int basePercent, int multiplier)
+        {
+            return basePercent * math.max(1, multiplier);
         }
 
         public static int PickRandomId(
@@ -221,6 +284,72 @@ namespace Elections.Models
             }
         }
 
+        public static bool HasVoteProbabilityEffect(int tagId)
+        {
+            switch (NormalizeId(tagId))
+            {
+                case HumbleBeginnings:
+                case ControversialPast:
+                case Scientist:
+                case Fundraiser:
+                case PoorSpeaker:
+                case Charismatic:
+                case UnionOrganizer:
+                case StudentFavorite:
+                case ElderStatesperson:
+                case YoungReformer:
+                case Technocrat:
+                case Populist:
+                case EliteConnections:
+                case TransitAdvocate:
+                case MotoristAdvocate:
+                case LawAndOrder:
+                case Environmentalist:
+                case BusinessFriendly:
+                case NeighborhoodChampion:
+                case Cautious:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        public static int GetCampaignVoteEffectMultiplier(ElectionState state, int candidateIndex, int tagId)
+        {
+            tagId = NormalizeId(tagId);
+            if (!HasVoteProbabilityEffect(tagId) && tagId != Polarizing)
+                return 1;
+
+            uint mixed = Mix(GetCampaignTagSeed(state, candidateIndex, tagId));
+            return mixed % 100 < DoubleVoteEffectChancePercent ? 2 : 1;
+        }
+
+        private static uint GetCampaignTagSeed(ElectionState state, int candidateIndex, int tagId)
+        {
+            unchecked
+            {
+                Entity candidate = state.GetCandidate(candidateIndex);
+                int value =
+                    state.electionDayKey * 73856093 ^
+                    (candidateIndex + 1) * 19349663 ^
+                    tagId * 83492791 ^
+                    candidate.Index * 265443576 ^
+                    candidate.Version * 1597334677;
+
+                return (uint)math.max(1, math.abs(value));
+            }
+        }
+
+        private static uint Mix(uint value)
+        {
+            value ^= value >> 16;
+            value *= 0x7feb352d;
+            value ^= value >> 15;
+            value *= 0x846ca68b;
+            value ^= value >> 16;
+            return value;
+        }
+
         public static float GetPlatformEffectScale(int tagId)
         {
             switch (NormalizeId(tagId))
@@ -278,10 +407,31 @@ namespace Elections.Models
             if (NormalizeId(candidateATagId) == Polarizing ||
                 NormalizeId(candidateBTagId) == Polarizing)
             {
-                return math.clamp(ScaleMoney(dailyTurnoutPercent, 1.15f), 1, 100);
+                return ApplyTurnoutIncrease(dailyTurnoutPercent, 2);
             }
 
             return math.clamp(dailyTurnoutPercent, 1, 100);
+        }
+
+        public static int ApplyTurnoutModifier(int dailyTurnoutPercent, ElectionState state)
+        {
+            int candidateCount = state.ActiveCandidateCount;
+            int bestMultiplier = 1;
+            for (int i = 0; i < candidateCount; i++)
+            {
+                if (NormalizeId(state.GetCandidateTagId(i)) == Polarizing)
+                    bestMultiplier = math.max(bestMultiplier, GetCampaignVoteEffectMultiplier(state, i, Polarizing));
+            }
+
+            return bestMultiplier > 1
+                ? ApplyTurnoutIncrease(dailyTurnoutPercent, bestMultiplier)
+                : math.clamp(dailyTurnoutPercent, 1, 100);
+        }
+
+        private static int ApplyTurnoutIncrease(int dailyTurnoutPercent, int multiplier)
+        {
+            float turnoutMultiplier = 1f + 0.15f * math.max(1, multiplier);
+            return math.clamp(ScaleMoney(dailyTurnoutPercent, turnoutMultiplier), 1, 100);
         }
 
         private static int ScaleMoney(int value, float multiplier)

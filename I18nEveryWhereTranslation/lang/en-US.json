@@ -11,8 +11,6 @@
   "Options.OPTION_DESCRIPTION[Elections.Elections.Mod.Setting.UseUniversalModMenu]": "Show the Elections button in Universal Mod Menu instead of the top-left game overlay.",
   "Options.OPTION[Elections.Elections.Mod.Setting.VotingSiteOverlayScalePercent]": "Voting Site Overlay Size",
   "Options.OPTION_DESCRIPTION[Elections.Elections.Mod.Setting.VotingSiteOverlayScalePercent]": "Size of the voting-site marker, ballot icon, and vote count. 100% = 1.0 scale, 120% is the default, and changes apply immediately.",
-  "Options.OPTION[Elections.Elections.Mod.Setting.PollSamplePercent]": "Poll Sample Percent",
-  "Options.OPTION_DESCRIPTION[Elections.Elections.Mod.Setting.PollSamplePercent]": "Approximate share of total city population represented in the campaign poll. Default is 2% and the maximum is 10%.",
   "Options.OPTION[Elections.Elections.Mod.Setting.AgeTurnoutCountryPreset]": "Age Turnout Country",
   "Options.OPTION_DESCRIPTION[Elections.Elections.Mod.Setting.AgeTurnoutCountryPreset]": "Choose a real-world age turnout preset from countries with published age turnout data, plus the European Union.",
   "Options.OPTION[Elections.Elections.Mod.Setting.ApplyAgeTurnoutCountryPreset]": "Apply Age Turnout Preset",

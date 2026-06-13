@@ -10,29 +10,42 @@ namespace Elections.Models
         ElderlyVoterEducation = 3,
         VoterEducation = 4,
         LowIncomeVoterOutreach = 5,
-        TransitVouchers = 6
+        TransitVouchers = 6,
+        CivicForums = 7
     }
 
     internal readonly struct ElectionSupportProgramDefinition
     {
+        private readonly string m_Title;
+        private readonly string m_Description;
+        private readonly string m_Tooltip;
+
         public ElectionSupportProgramDefinition(ElectionSupportProgramType type, string title, string description, string tooltip)
         {
             Type = type;
-            Title = title;
-            Description = description;
-            Tooltip = tooltip;
+            m_Title = title;
+            m_Description = description;
+            m_Tooltip = tooltip;
         }
 
         public ElectionSupportProgramType Type { get; }
         public int Index => (int)Type;
-        public string Title { get; }
-        public string Description { get; }
-        public string Tooltip { get; }
+        public string Title => ElectionLocalization.Translate($"Model.SupportProgram.{Index}.Title", m_Title);
+        public string Description => Format("Description", m_Description);
+        public string Tooltip => Format("Tooltip", m_Tooltip);
+
+        private string Format(string suffix, string fallback)
+        {
+            int bonus = ElectionSupportPrograms.GetBonusPercent(Type);
+            return bonus > 0
+                ? ElectionLocalization.Format($"Model.SupportProgram.{Index}.{suffix}", fallback, bonus)
+                : ElectionLocalization.Translate($"Model.SupportProgram.{Index}.{suffix}", fallback);
+        }
     }
 
     internal static class ElectionSupportPrograms
     {
-        public const int Count = 7;
+        public const int Count = 8;
         public const int LegacyTurnoutProgramDailyBonusPercent = 10;
         public const int TeenTurnoutProgramDailyBonusPercent = 30;
         public const int AdultTurnoutProgramDailyBonusPercent = 10;
@@ -40,6 +53,7 @@ namespace Elections.Models
         public const int EducationTurnoutProgramDailyBonusPercent = 10;
         public const int LowIncomeTurnoutProgramDailyBonusPercent = 10;
         public const int TransitVoucherTurnoutProgramDailyBonusPercent = 5;
+        public const int CivicForumTurnoutProgramDailyBonusPercent = 5;
 
         public static bool TryGet(int index, out ElectionSupportProgramDefinition definition)
         {
@@ -94,6 +108,13 @@ namespace Elections.Models
                         $"Adds +{TransitVoucherTurnoutProgramDailyBonusPercent}% election turnout for teens, elderly, and low-income residents without cars.",
                         $"Fund transit vouchers for teens, elderly residents, and struggling or modest-income residents who do not have a car. Each program adds +{TransitVoucherTurnoutProgramDailyBonusPercent}% to election turnout for eligible residents.");
                     return true;
+                case ElectionSupportProgramType.CivicForums:
+                    definition = new ElectionSupportProgramDefinition(
+                        ElectionSupportProgramType.CivicForums,
+                        "Civic forums",
+                        $"Adds +{CivicForumTurnoutProgramDailyBonusPercent}% election turnout for educated, well educated, and highly educated residents.",
+                        $"Fund public candidate forums, policy debates, and civic talks for educated residents. Each forum adds +{CivicForumTurnoutProgramDailyBonusPercent}% to election turnout for educated, well educated, and highly educated residents.");
+                    return true;
                 default:
                     definition = default;
                     return false;
@@ -121,6 +142,8 @@ namespace Elections.Models
                     return LowIncomeTurnoutProgramDailyBonusPercent;
                 case ElectionSupportProgramType.TransitVouchers:
                     return TransitVoucherTurnoutProgramDailyBonusPercent;
+                case ElectionSupportProgramType.CivicForums:
+                    return CivicForumTurnoutProgramDailyBonusPercent;
                 default:
                     return 0;
             }

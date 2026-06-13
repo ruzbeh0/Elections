@@ -1,5 +1,6 @@
 using Colossal.Mathematics;
 using Elections.Components;
+using Elections.Models;
 using Game;
 using Game.Buildings;
 using Game.Common;
@@ -32,6 +33,8 @@ namespace Elections.Systems
         private int m_LastTalliedVoteArrivals;
         private int m_LastTalliedVotesA;
         private int m_LastTalliedVotesB;
+        private int m_LastTalliedVotesC;
+        private int m_LastTalliedVotesD;
 
         protected override void OnCreate()
         {
@@ -59,11 +62,21 @@ namespace Elections.Systems
 
             ElectionState state = default;
             bool showVoteCounts = false;
+            int candidateCount = ElectionState.DefaultCandidateCount;
             if (!m_StateQuery.IsEmptyIgnoreFilter)
             {
                 state = m_StateQuery.GetSingleton<ElectionState>();
                 showVoteCounts = state.stage == ElectionCampaignStage.Voting && state.electionDayKey != 0;
+                candidateCount = state.HasCandidates
+                    ? state.ActiveCandidateCount
+                    : ElectionState.DefaultCandidateCount;
             }
+
+            candidateCount = ElectionState.NormalizeCandidateCount(candidateCount);
+            int partyColorA = GetOverlayPartyColor(state, 0);
+            int partyColorB = GetOverlayPartyColor(state, 1);
+            int partyColorC = GetOverlayPartyColor(state, 2);
+            int partyColorD = GetOverlayPartyColor(state, 3);
 
             if (showVoteCounts)
                 TallyVotes(state);
@@ -101,6 +114,11 @@ namespace Elections.Systems
                 overlayBuffer = buffer,
                 markers = markers.AsArray(),
                 showVoteCounts = showVoteCounts,
+                candidateCount = candidateCount,
+                partyColorA = partyColorA,
+                partyColorB = partyColorB,
+                partyColorC = partyColorC,
+                partyColorD = partyColorD,
                 zoomLevel = m_CameraUpdateSystem.zoom,
                 markerScale = math.clamp((Mod.m_Setting?.VotingSiteOverlayScalePercent ?? 120) / 100f, 1f, 2f),
                 cameraRight = cameraRight,
@@ -112,6 +130,37 @@ namespace Elections.Systems
             markers.Dispose(drawHandle);
             Dependency = drawHandle;
             m_OverlayRenderSystem.AddBufferWriter(Dependency);
+        }
+
+        private static int GetOverlayPartyColor(ElectionState state, int partyIndex)
+        {
+            if (Mod.m_Setting?.EnableParties ?? false)
+            {
+                int color = state.GetPartyColor(partyIndex) & 0xffffff;
+                if (color != 0)
+                    return color;
+
+                return ElectionPartyTags.GetDefaultColor(partyIndex);
+            }
+
+            return GetDefaultCandidateColor(partyIndex);
+        }
+
+        private static int GetDefaultCandidateColor(int index)
+        {
+            switch (index)
+            {
+                case 0:
+                    return 0xb16cff;
+                case 1:
+                    return 0x62d26f;
+                case 2:
+                    return 0xd8a720;
+                case 3:
+                    return 0xff6fb3;
+                default:
+                    return 0xdbf5ff;
+            }
         }
 
         private EntityQuery CreatePollingPlaceQuery(ComponentType componentType)
@@ -138,11 +187,15 @@ namespace Elections.Systems
                 m_LastTalliedVoteArrivals = -1;
                 m_LastTalliedVotesA = -1;
                 m_LastTalliedVotesB = -1;
+                m_LastTalliedVotesC = -1;
+                m_LastTalliedVotesD = -1;
             }
 
             if (m_LastTalliedVoteArrivals == state.voteArrivals &&
                 m_LastTalliedVotesA == state.votesA &&
-                m_LastTalliedVotesB == state.votesB)
+                m_LastTalliedVotesB == state.votesB &&
+                m_LastTalliedVotesC == state.votesC &&
+                m_LastTalliedVotesD == state.votesD)
             {
                 return;
             }
@@ -175,12 +228,16 @@ namespace Elections.Systems
                 VoteTally current = entry.Value;
                 displayed.votesA = math.max(displayed.votesA, current.votesA);
                 displayed.votesB = math.max(displayed.votesB, current.votesB);
+                displayed.votesC = math.max(displayed.votesC, current.votesC);
+                displayed.votesD = math.max(displayed.votesD, current.votesD);
                 m_VoteTallies[entry.Key] = displayed;
             }
 
             m_LastTalliedVoteArrivals = state.voteArrivals;
             m_LastTalliedVotesA = state.votesA;
             m_LastTalliedVotesB = state.votesB;
+            m_LastTalliedVotesC = state.votesC;
+            m_LastTalliedVotesD = state.votesD;
         }
 
         private void ClearTallies()
@@ -191,6 +248,8 @@ namespace Elections.Systems
             m_LastTalliedVoteArrivals = -1;
             m_LastTalliedVotesA = -1;
             m_LastTalliedVotesB = -1;
+            m_LastTalliedVotesC = -1;
+            m_LastTalliedVotesD = -1;
         }
 
         private void AddPollingPlaces(EntityQuery query, NativeList<VotingLocationMarker> markers, bool showVoteCounts, ElectionState state)
@@ -218,7 +277,9 @@ namespace Elections.Systems
                     {
                         position = transform.m_Position,
                         votesA = tally.votesA,
-                        votesB = tally.votesB
+                        votesB = tally.votesB,
+                        votesC = tally.votesC,
+                        votesD = tally.votesD
                     });
                 }
             }
@@ -228,10 +289,15 @@ namespace Elections.Systems
         {
             if (pollingPlace != Entity.Null &&
                 pollingPlace == state.voteTamperingPollingPlace &&
-                (state.voteTamperingLostVotesA > 0 || state.voteTamperingLostVotesB > 0))
+                (state.voteTamperingLostVotesA > 0 ||
+                 state.voteTamperingLostVotesB > 0 ||
+                 state.voteTamperingLostVotesC > 0 ||
+                 state.voteTamperingLostVotesD > 0))
             {
                 tally.votesA = math.max(0, tally.votesA - state.voteTamperingLostVotesA);
                 tally.votesB = math.max(0, tally.votesB - state.voteTamperingLostVotesB);
+                tally.votesC = math.max(0, tally.votesC - state.voteTamperingLostVotesC);
+                tally.votesD = math.max(0, tally.votesD - state.voteTamperingLostVotesD);
             }
 
             return tally;
@@ -241,6 +307,8 @@ namespace Elections.Systems
         {
             public int votesA;
             public int votesB;
+            public int votesC;
+            public int votesD;
         }
 
         private struct VotingLocationMarker
@@ -248,6 +316,8 @@ namespace Elections.Systems
             public float3 position;
             public int votesA;
             public int votesB;
+            public int votesC;
+            public int votesD;
         }
 
         [BurstCompile]
@@ -266,10 +336,21 @@ namespace Elections.Systems
                         continue;
 
                     tallies.TryGetValue(voteTrip.pollingPlace, out VoteTally tally);
-                    if (voteTrip.chosenCandidate == 0)
-                        tally.votesA++;
-                    else if (voteTrip.chosenCandidate == 1)
-                        tally.votesB++;
+                    switch (voteTrip.chosenCandidate)
+                    {
+                        case 0:
+                            tally.votesA++;
+                            break;
+                        case 1:
+                            tally.votesB++;
+                            break;
+                        case 2:
+                            tally.votesC++;
+                            break;
+                        case 3:
+                            tally.votesD++;
+                            break;
+                    }
 
                     tallies[voteTrip.pollingPlace] = tally;
                 }
@@ -282,6 +363,11 @@ namespace Elections.Systems
             public OverlayRenderSystem.Buffer overlayBuffer;
             [ReadOnly] public NativeArray<VotingLocationMarker> markers;
             public bool showVoteCounts;
+            public int candidateCount;
+            public int partyColorA;
+            public int partyColorB;
+            public int partyColorC;
+            public int partyColorD;
             public float zoomLevel;
             public float markerScale;
             public float3 cameraRight;
@@ -320,15 +406,25 @@ namespace Elections.Systems
                     DrawLeader(anchor + toCamera * (thickness * 0.6f), center, badgeSize, thickness, right);
                     DrawLocationAnchor(anchor + toCamera * (thickness * 0.65f), thickness, right);
 
-                    DrawBallotMarker(center, badgeSize, markerThickness, right, up, marker.votesA, marker.votesB, showVoteCounts);
+                    DrawBallotMarker(
+                        center,
+                        badgeSize,
+                        markerThickness,
+                        right,
+                        up,
+                        marker.votesA,
+                        marker.votesB,
+                        marker.votesC,
+                        marker.votesD,
+                        candidateCount,
+                        showVoteCounts);
 
                     if (showVoteCounts)
                     {
                         float3 labelCenter = center - up * (badgeSize * 1.25f);
                         DrawVoteSplitIndicator(
                             labelCenter,
-                            marker.votesA,
-                            marker.votesB,
+                            GetVoteTotal(marker.votesA, marker.votesB, marker.votesC, marker.votesD, candidateCount),
                             new Color(0.05f, 0.10f, 0.17f, 1f),
                             new Color(0.94f, 0.98f, 1f, 1f),
                             markerThickness,
@@ -380,7 +476,7 @@ namespace Elections.Systems
                 DrawDisc(center, thickness * 1.55f, right, new Color(0.86f, 0.96f, 1f, 0.95f));
             }
 
-            private void DrawBallotMarker(float3 center, float size, float thickness, float3 right, float3 up, int votesA, int votesB, bool showVoteCounts)
+            private void DrawBallotMarker(float3 center, float size, float thickness, float3 right, float3 up, int votesA, int votesB, int votesC, int votesD, int candidateCount, bool showVoteCounts)
             {
                 Color shadow = new Color(0.01f, 0.04f, 0.09f, 1f);
                 Color navy = new Color(0.04f, 0.10f, 0.17f, 1f);
@@ -392,7 +488,7 @@ namespace Elections.Systems
 
                 DrawDisc(center - up * (thickness * 0.06f), size * 2.06f, right, shadow);
                 DrawDisc(center, size * 1.56f, right, navy);
-                DrawVoteRing(center, size * 0.92f, thickness * 0.64f, votesA, votesB, showVoteCounts, right, up);
+                DrawVoteRing(center, size * 0.92f, thickness * 0.64f, votesA, votesB, votesC, votesD, candidateCount, showVoteCounts, right, up);
 
                 float paperWidth = size * 0.56f;
                 float paperHeight = size * 0.72f;
@@ -421,14 +517,12 @@ namespace Elections.Systems
                 overlayBuffer.DrawLine(check, new Line3.Segment(checkMiddle, checkEnd), thickness * 0.18f);
             }
 
-            private void DrawVoteRing(float3 center, float radius, float ringThickness, int votesA, int votesB, bool showVoteCounts, float3 right, float3 up)
+            private void DrawVoteRing(float3 center, float radius, float ringThickness, int votesA, int votesB, int votesC, int votesD, int candidateCount, bool showVoteCounts, float3 right, float3 up)
             {
-                Color purple = new Color(0.72f, 0.42f, 1.0f, 1f);
-                Color green = new Color(0.34f, 0.86f, 0.44f, 1f);
                 Color track = new Color(0.11f, 0.17f, 0.25f, 1f);
-                int total = math.max(0, votesA + votesB);
-                float aShare = showVoteCounts && total > 0 ? math.saturate(votesA / (float)total) : 0.5f;
-                int segments = 52;
+                int activeCandidateCount = math.clamp(candidateCount, ElectionState.MinCandidateCount, ElectionState.MaxCandidateCount);
+                int total = GetVoteTotal(votesA, votesB, votesC, votesD, activeCandidateCount);
+                int segments = 64;
                 float tau = math.PI * 2f;
                 float startAngle = -math.PI * 0.56f;
 
@@ -440,9 +534,88 @@ namespace Elections.Systems
                     float angle1 = startAngle + tau * ((i + 0.78f) / segments);
                     float3 start = center + right * (math.cos(angle0) * radius) + up * (math.sin(angle0) * radius);
                     float3 end = center + right * (math.cos(angle1) * radius) + up * (math.sin(angle1) * radius);
-                    Color color = total == 0 && showVoteCounts ? track : (normalizedMid <= aShare ? purple : green);
+                    Color color = GetVoteRingColor(normalizedMid, votesA, votesB, votesC, votesD, activeCandidateCount, total, showVoteCounts, track);
                     overlayBuffer.DrawLine(color, new Line3.Segment(start, end), ringThickness);
                 }
+            }
+
+            private Color GetVoteRingColor(float normalizedPosition, int votesA, int votesB, int votesC, int votesD, int candidateCount, int total, bool showVoteCounts, Color track)
+            {
+                if (candidateCount <= 0)
+                    return track;
+
+                if (!showVoteCounts || total <= 0)
+                {
+                    int equalIndex = math.min(candidateCount - 1, (int)math.floor(normalizedPosition * candidateCount));
+                    return GetCandidateColor(equalIndex);
+                }
+
+                int runningVotes = 0;
+                for (int i = 0; i < candidateCount; i++)
+                {
+                    runningVotes += GetCandidateVoteCount(i, votesA, votesB, votesC, votesD);
+                    if (runningVotes > 0 && normalizedPosition <= math.saturate(runningVotes / (float)total))
+                        return GetCandidateColor(i);
+                }
+
+                return GetCandidateColor(candidateCount - 1);
+            }
+
+            private int GetVoteTotal(int votesA, int votesB, int votesC, int votesD, int candidateCount)
+            {
+                int total = math.max(0, votesA) + math.max(0, votesB);
+                if (candidateCount > 2)
+                    total += math.max(0, votesC);
+                if (candidateCount > 3)
+                    total += math.max(0, votesD);
+                return math.max(0, total);
+            }
+
+            private int GetCandidateVoteCount(int index, int votesA, int votesB, int votesC, int votesD)
+            {
+                switch (index)
+                {
+                    case 0:
+                        return math.max(0, votesA);
+                    case 1:
+                        return math.max(0, votesB);
+                    case 2:
+                        return math.max(0, votesC);
+                    case 3:
+                        return math.max(0, votesD);
+                    default:
+                        return 0;
+                }
+            }
+
+            private Color GetCandidateColor(int index)
+            {
+                switch (index)
+                {
+                    case 0:
+                        return PackedColorToColor(partyColorA);
+                    case 1:
+                        return PackedColorToColor(partyColorB);
+                    case 2:
+                        return PackedColorToColor(partyColorC);
+                    case 3:
+                        return PackedColorToColor(partyColorD);
+                    default:
+                        return new Color(0.86f, 0.96f, 1f, 1f);
+                }
+            }
+
+            private static Color PackedColorToColor(int packedColor)
+            {
+                packedColor &= 0xffffff;
+                if (packedColor == 0)
+                    return new Color(0.86f, 0.96f, 1f, 1f);
+
+                return new Color(
+                    ((packedColor >> 16) & 0xff) / 255f,
+                    ((packedColor >> 8) & 0xff) / 255f,
+                    (packedColor & 0xff) / 255f,
+                    1f);
             }
 
             private void DrawDisc(float3 center, float diameter, float3 right, Color color)
@@ -458,9 +631,9 @@ namespace Elections.Systems
                 overlayBuffer.DrawLine(color, new Line3.Segment(start, end), height + outlinePadding);
             }
 
-            private void DrawVoteSplitIndicator(float3 center, int votesA, int votesB, Color bgColor, Color textColor, float thickness, float3 right, float3 up)
+            private void DrawVoteSplitIndicator(float3 center, int voteTotal, Color bgColor, Color textColor, float thickness, float3 right, float3 up)
             {
-                int number = math.max(0, votesA + votesB);
+                int number = math.max(0, voteTotal);
                 number = math.max(0, number);
                 int digitsCount = GetDigitCount(number);
                 int tempNum = number;
@@ -494,10 +667,10 @@ namespace Elections.Systems
                 overlayBuffer.DrawLine(new Color(0.18f, 0.2f, 0.26f, 1f), new Line3.Segment(left, end), height);
 
                 if (votesA > 0)
-                    overlayBuffer.DrawLine(new Color(0.69f, 0.42f, 1.0f, 1f), new Line3.Segment(left, split), height);
+                    overlayBuffer.DrawLine(GetCandidateColor(0), new Line3.Segment(left, split), height);
 
                 if (votesB > 0)
-                    overlayBuffer.DrawLine(new Color(0.38f, 0.82f, 0.44f, 1f), new Line3.Segment(split, end), height);
+                    overlayBuffer.DrawLine(GetCandidateColor(1), new Line3.Segment(split, end), height);
             }
 
             private int GetDigitCount(int number)

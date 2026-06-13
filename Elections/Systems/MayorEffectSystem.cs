@@ -42,9 +42,11 @@ namespace Elections.Systems
 
             Entity stateEntity = m_StateQuery.GetSingletonEntity();
             ElectionState state = EntityManager.GetComponentData<ElectionState>(stateEntity);
+            int mayorPartySignature = GetMayorPartySignature(state);
             bool appliedEffectMatches = state.appliedEffectId == state.mayorEffectId &&
                                         state.appliedNegativeSoftened == state.mayorNegativeSoftened &&
-                                        state.appliedEffectTagId == state.mayorTagId;
+                                        state.appliedEffectTagId == state.mayorTagId &&
+                                        state.appliedEffectPartySignature == mayorPartySignature;
 
             if (appliedEffectMatches && state.mayorMoneyApplied)
             {
@@ -61,14 +63,14 @@ namespace Elections.Systems
 
             if (!appliedEffectMatches)
             {
-                ElectionDebug.Log($"Mayor effect changed: appliedEffectId={state.appliedEffectId}, mayorEffectId={state.mayorEffectId}, softened={state.mayorNegativeSoftened}, appliedTag={state.appliedEffectTagId}, mayorTag={state.mayorTagId}. Removing old modifiers before applying the new effect.");
+                ElectionDebug.Log($"Mayor effect changed: appliedEffectId={state.appliedEffectId}, mayorEffectId={state.mayorEffectId}, softened={state.mayorNegativeSoftened}, appliedTag={state.appliedEffectTagId}, mayorTag={state.mayorTagId}, appliedPartySignature={state.appliedEffectPartySignature}, mayorPartySignature={mayorPartySignature}. Removing old modifiers before applying the new effect.");
                 RealisticTripsBridge.ClearMayorResourceConsumptionMultiplier(state.appliedEffectId);
                 RemoveAppliedModifiers(city, ref state);
             }
 
             if (state.mayorEffectId > 0)
             {
-                ElectionEffectDefinition effect = ElectionEffects.Get(state.mayorEffectId, state.mayorNegativeSoftened, state.mayorTagId);
+                ElectionEffectDefinition effect = GetMayorEffectDefinition(state);
                 SyncRealisticTripsEffect(effect);
 
                 if (!state.mayorMoneyApplied)
@@ -86,6 +88,7 @@ namespace Elections.Systems
                     state.appliedEffectId = state.mayorEffectId;
                     state.appliedNegativeSoftened = state.mayorNegativeSoftened;
                     state.appliedEffectTagId = state.mayorTagId;
+                    state.appliedEffectPartySignature = mayorPartySignature;
                 }
             }
             else
@@ -95,6 +98,7 @@ namespace Elections.Systems
                 state.mayorMoneyApplied = true;
                 state.appliedNegativeSoftened = false;
                 state.appliedEffectTagId = state.mayorTagId;
+                state.appliedEffectPartySignature = mayorPartySignature;
             }
 
             EntityManager.SetComponentData(stateEntity, state);
@@ -181,7 +185,29 @@ namespace Elections.Systems
                 return;
             }
 
-            SyncRealisticTripsEffect(ElectionEffects.Get(state.mayorEffectId, state.mayorNegativeSoftened, state.mayorTagId));
+            SyncRealisticTripsEffect(GetMayorEffectDefinition(state));
+        }
+
+        private static int GetMayorPartySignature(ElectionState state)
+        {
+            return (Mod.m_Setting?.EnableParties ?? false)
+                ? state.GetPartyPlatformSignature(state.mayorPartyIndex)
+                : 0;
+        }
+
+        private static ElectionEffectDefinition GetMayorEffectDefinition(ElectionState state)
+        {
+            int tagId = state.mayorTagId;
+            float candidatePlatformScale = ElectionCandidateTags.GetPlatformEffectScale(tagId);
+            float positiveScale = candidatePlatformScale;
+            float negativeScale = (state.mayorNegativeSoftened ? 0.5f : 1f) * candidatePlatformScale;
+            if (Mod.m_Setting?.EnableParties ?? false)
+            {
+                positiveScale *= ElectionPartyTags.GetPositivePlatformScale(state, state.mayorPartyIndex);
+                negativeScale *= ElectionPartyTags.GetNegativePlatformScale(state, state.mayorPartyIndex);
+            }
+
+            return ElectionEffects.Get(state.mayorEffectId, positiveScale, negativeScale);
         }
 
         private static void SyncRealisticTripsEffect(ElectionEffectDefinition effect)
@@ -224,6 +250,7 @@ namespace Elections.Systems
             state.appliedEffectId = 0;
             state.appliedNegativeSoftened = false;
             state.appliedEffectTagId = 0;
+            state.appliedEffectPartySignature = 0;
             state.appliedModifierType1 = -1;
             state.appliedModifierAdd1 = 0f;
             state.appliedModifierMul1 = 0f;

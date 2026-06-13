@@ -12,12 +12,14 @@ namespace Elections.Systems
         private const string DataUriPrefix = "data:image/jpeg;base64,";
         private const int SkinVariantCount = 5;
         private const int BasePortraitCount = 20;
-        private const int ExtraPortraitCount = 20;
+        private const int ExtraPortraitCount = 40;
         private const int PortraitCount = BasePortraitCount + ExtraPortraitCount;
         private static readonly bool[] s_ExtraPortraitIsMale =
         {
             true, false, true, false, true, false, true, false, true, false,
-            true, false, false, true, false, true, false, true, false, true
+            true, false, false, true, false, true, false, true, false, true,
+            true, false, true, true, true, false, true, false, false, true,
+            true, false, true, false, false, false, true, false, true, false
         };
 
         private static readonly Dictionary<string, string> s_DataUriByFileName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

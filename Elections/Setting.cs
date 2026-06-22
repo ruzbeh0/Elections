@@ -65,6 +65,7 @@ namespace Elections
         }
 
         [SettingsUISection(kGeneralSection, kGeneralGroup)]
+        [SettingsUISetter(typeof(Setting), nameof(SetEnableElections))]
         public bool EnableElections { get; set; }
 
         [SettingsUISection(kGeneralSection, kGeneralGroup)]
@@ -192,6 +193,13 @@ namespace Elections
             var world = World.DefaultGameObjectInjectionWorld;
             var system = world?.GetExistingSystemManaged<ElectionUISystem>();
             system?.UpdateUseUniversalModMenu(value);
+        }
+
+        public void SetEnableElections(bool value)
+        {
+            var world = World.DefaultGameObjectInjectionWorld;
+            var system = world?.GetExistingSystemManaged<ElectionUISystem>();
+            system?.UpdateElectionsEnabled(value);
         }
 
         public void ApplyAgeTurnoutPreset(TurnoutCountryPreset preset)

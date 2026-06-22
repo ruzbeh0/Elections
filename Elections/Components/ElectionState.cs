@@ -17,14 +17,15 @@ namespace Elections.Components
     {
         // Keep the state marker lower than unpublished layout churn while still mapping it to
         // the current field layout below. Known published/committed layouts include 17, 19, and 22.
-        public const int CurrentVersion = 23;
-        private const int CurrentSerializedLayoutVersion = 31;
+        public const int CurrentVersion = 24;
+        private const int CurrentSerializedLayoutVersion = 32;
         public const int MinCandidateCount = 2;
         public const int DefaultCandidateCount = 2;
         public const int MaxCandidateCount = 4;
 
         public int version;
         public bool initialized;
+        public bool democraticTransitionCompleted;
         public int lastProcessedDayKey;
 
         public ElectionCampaignStage stage;
@@ -1985,6 +1986,7 @@ namespace Elections.Components
             writer.Write(pendingMayorPartyIndex);
             writer.Write(pendingMayorTermYear);
             writer.Write(pendingMayorInaugurated);
+            writer.Write(democraticTransitionCompleted);
         }
 
         public void Deserialize<TReader>(TReader reader) where TReader : IReader
@@ -2691,6 +2693,21 @@ namespace Elections.Components
                 pendingMayorPartyIndex = -1;
                 pendingMayorTermYear = 0;
                 pendingMayorInaugurated = false;
+            }
+
+            if (layoutVersion >= 32)
+            {
+                reader.Read(out democraticTransitionCompleted);
+            }
+            else
+            {
+                democraticTransitionCompleted =
+                    mayorEffectId > 0 ||
+                    appliedEffectId > 0 ||
+                    (pendingMayor != Entity.Null && pendingMayorEffectId > 0) ||
+                    (stage == ElectionCampaignStage.None &&
+                        electionDayKey > 0 &&
+                        (voteArrivals > 0 || votesA + votesB + votesC + votesD > 0));
             }
 
             strictVotingIdLawPassed = HasLegislation(ElectionLegislationType.VoterIdentification);

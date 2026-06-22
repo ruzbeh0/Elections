@@ -111,6 +111,14 @@ namespace Elections.Systems
             m_UseUniversalModMenuBinding?.Update(value);
         }
 
+        public void UpdateElectionsEnabled(bool value)
+        {
+            if (!value && ShowVotingLocations)
+                SetShowVotingLocations(false);
+
+            m_PanelBinding?.Update();
+        }
+
         private void Donate(int candidateIndex, int tierIndex)
         {
             m_LifecycleSystem?.Donate(candidateIndex, tierIndex);
@@ -278,6 +286,7 @@ namespace Elections.Systems
         {
             DateTime now = default;
             bool hasDateTime = RealisticTripsBridge.TryGetCurrentDateTime(out now);
+            bool realisticTripsReady = hasDateTime && RealisticTripsBridge.IsAvailable;
             string currentDate = hasDateTime ? ElectionUtility.FormatCurrentDate(World, now) : string.Empty;
             bool electionsEnabled = Mod.m_Setting?.EnableElections ?? false;
             bool partiesEnabled = Mod.m_Setting?.EnableParties ?? false;
@@ -287,6 +296,7 @@ namespace Elections.Systems
             writer.TypeBegin("ElectionPanel");
             writer.PropertyName("enabled"); writer.Write(electionsEnabled);
             writer.PropertyName("partiesEnabled"); writer.Write(partiesEnabled);
+            writer.PropertyName("realisticTripsReady"); writer.Write(realisticTripsReady);
             writer.PropertyName("currentDate"); writer.Write(currentDate);
             writer.PropertyName("currentPopulation"); writer.Write(currentPopulation);
             writer.PropertyName("minimumPopulation"); writer.Write(ElectionLifecycleSystem.MinimumPopulation);
@@ -294,14 +304,19 @@ namespace Elections.Systems
 
             if (!TryGetPreparedState(out ElectionState state))
             {
-                bool waitingForPopulation = electionsEnabled && !populationReady;
+                bool waitingForRealisticTrips = electionsEnabled && !realisticTripsReady;
+                bool waitingForPopulation = electionsEnabled && realisticTripsReady && !populationReady;
                 writer.PropertyName("hasState"); writer.Write(false);
                 writer.PropertyName("waitingForPopulation"); writer.Write(waitingForPopulation);
                 writer.PropertyName("stage"); writer.Write("None");
-                writer.PropertyName("stageLabel"); writer.Write(waitingForPopulation
+                writer.PropertyName("stageLabel"); writer.Write(waitingForRealisticTrips
+                    ? L("Panel.Stage.WaitingForRealisticTrips", "Waiting for Realistic Trips")
+                    : waitingForPopulation
                     ? L("Panel.Stage.WaitingForResidents", "Waiting for residents")
                     : L("Panel.Stage.NoElectionData", "No election data"));
-                writer.PropertyName("cycleLabel"); writer.Write(waitingForPopulation
+                writer.PropertyName("cycleLabel"); writer.Write(waitingForRealisticTrips
+                    ? L("Panel.Cycle.WaitingRealisticTrips", "Elections require Realistic Trips to be installed, enabled, and loaded before the city date and voting trips are available.")
+                    : waitingForPopulation
                     ? LF("Panel.Cycle.WaitingPopulation", "Elections start at {0:n0} population. Current population: {1:n0}.", ElectionLifecycleSystem.MinimumPopulation, currentPopulation)
                     : L("Panel.Cycle.NotInitialized", "The election system has not initialized yet."));
                 writer.PropertyName("runoffEnabledForCycle"); writer.Write(false);
@@ -350,7 +365,9 @@ namespace Elections.Systems
             }
 
             bool pollReleased = HasPollResults(state);
+            bool waitingForRealisticTripsState = electionsEnabled && !realisticTripsReady;
             bool waitingForPopulationState = electionsEnabled &&
+                realisticTripsReady &&
                 !populationReady &&
                 !state.HasCandidates &&
                 state.stage == ElectionCampaignStage.None;
@@ -377,8 +394,12 @@ namespace Elections.Systems
             writer.PropertyName("hasState"); writer.Write(true);
             writer.PropertyName("waitingForPopulation"); writer.Write(waitingForPopulationState);
             writer.PropertyName("stage"); writer.Write(state.stage.ToString());
-            writer.PropertyName("stageLabel"); writer.Write(waitingForPopulationState ? L("Panel.Stage.WaitingForResidents", "Waiting for residents") : GetStageLabel(state, state.HasCandidates));
-            writer.PropertyName("cycleLabel"); writer.Write(waitingForPopulationState
+            writer.PropertyName("stageLabel"); writer.Write(waitingForRealisticTripsState
+                ? L("Panel.Stage.WaitingForRealisticTrips", "Waiting for Realistic Trips")
+                : waitingForPopulationState ? L("Panel.Stage.WaitingForResidents", "Waiting for residents") : GetStageLabel(state, state.HasCandidates));
+            writer.PropertyName("cycleLabel"); writer.Write(waitingForRealisticTripsState
+                ? L("Panel.Cycle.WaitingRealisticTrips", "Elections require Realistic Trips to be installed, enabled, and loaded before the city date and voting trips are available.")
+                : waitingForPopulationState
                 ? LF("Panel.Cycle.WaitingPopulation", "Elections start at {0:n0} population. Current population: {1:n0}.", ElectionLifecycleSystem.MinimumPopulation, currentPopulation)
                 : GetCycleLabel(state));
             writer.PropertyName("runoffEnabledForCycle"); writer.Write(state.runoffEnabledForCycle);

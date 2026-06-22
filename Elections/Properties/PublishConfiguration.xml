@@ -42,9 +42,9 @@ Elections adds a mayoral election cycle to the city. Residents can become candid
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/elections-mod.1927087/" />
 	<!--Version of the mod-->
-	<ModVersion Value="0.3" />
+	<ModVersion Value="0.3.1" />
 	<!--Recommended version of the base game to use the mod-->
-	<GameVersion Value="1.5.*" />
+	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times-->
 	<Dependency Id="77171" />
 	<Dependency Id="121812" />
@@ -52,15 +52,7 @@ Elections adds a mayoral election cycle to the city. Residents can become candid
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
-* Added configurable two to four candidate races and optional runoff elections.
-* Added optional political parties with editable names and colors, persistent reputation, win and term tracking, party tags, and party effects on voting behavior.
-* Added candidate traits that can affect voter support, donation costs, turnout, campaign effectiveness, mayor actions, and platform effects.
-* Added election legislation and expanded civic programs.
-* Expanded campaign actions with daily donation limits, mayor endorsements and bribe meetings, cash assistance, vote-count tampering, and improved corruption/scandal handling.
-* Reworked polling and results for multi-candidate races with larger poll samples, undecided handling, margin-of-error summaries, and age, education, and income breakdowns.
-* Rebuilt the Elections panel with clearer sections for schedule, voting sites, mayor residence/workplace, candidates, programs, legislation, parties, and richer tooltips/status messaging.
-* Improved voting-site overlays and election-day voting behavior with multi-candidate vote rings, party/candidate colors, election-day holiday scheduling, and better vote-trip timing.
-* Added more candidate portraits.
+* Fixed bug that was causing democratic transition to restart after it had already happened
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
 	<ExternalLink Type="github" Url="https://github.com/ruzbeh0/Elections" />

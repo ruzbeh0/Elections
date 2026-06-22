@@ -1575,6 +1575,7 @@ namespace Elections.Systems
             {
                 version = ElectionState.CurrentVersion,
                 initialized = false,
+                democraticTransitionCompleted = false,
                 stage = ElectionCampaignStage.None,
                 lastProcessedDayKey = 0,
                 appliedEffectId = 0,
@@ -1694,7 +1695,7 @@ namespace Elections.Systems
             if (!state.HasCandidates && state.stage == ElectionCampaignStage.None)
             {
                 int month = ElectionUtility.CurrentCalendarMonth(World, now);
-                if (month <= 7)
+                if (month <= 7 && !state.democraticTransitionCompleted)
                 {
                     StartCampaign(ref state, now, accelerated: true, reason: "repair empty inactive state before August");
                     return;
@@ -2761,21 +2762,34 @@ namespace Elections.Systems
                 return;
             }
 
+            bool transitionMayor = !state.democraticTransitionCompleted;
             state.mayor = mayor;
-            state.mayorEffectId = 0;
-            state.mayorNegativeSoftened = false;
-            state.mayorTagId = ElectionCandidateTags.None;
+            if (transitionMayor)
+            {
+                state.mayorEffectId = 0;
+                state.mayorNegativeSoftened = false;
+                state.mayorTagId = ElectionCandidateTags.None;
+                state.mayorPartyIndex = -1;
+            }
+
             ElectionUtility.GetCurrentCalendarDate(World, now, out int year, out _, out _);
-            state.mayorEffectTermYear = year;
-            state.mayorMoneyApplied = false;
+            if (state.mayorEffectTermYear <= 0)
+                state.mayorEffectTermYear = year;
+
+            if (transitionMayor)
+                state.mayorMoneyApplied = false;
 
             string name = GetEntityName(mayor, L("Lifecycle.Name.TemporaryMayor", "Temporary Mayor"));
             string portraitImageSource = CandidatePortraitCatalog.GetPortraitImageSource(
                 EntityManager,
                 mayor,
                 GetMayorPortraitIndex(state));
-            string text = LF("Lifecycle.TemporaryMayor.Intro", "I am {{LINK_1}}. I will serve as temporary mayor under the Democratic Transition platform: no new city policy changes, only supervising the election process until residents choose a mayor.");
-            DebugLog($"Temporary mayor assigned: mayor={DescribeEntity(mayor, name)}, termYear={state.mayorEffectTermYear}.");
+            string text = transitionMayor
+                ? LF("Lifecycle.TemporaryMayor.Intro", "I am {{LINK_1}}. I will serve as temporary mayor under the Democratic Transition platform: no new city policy changes, only supervising the election process until residents choose a mayor.")
+                : LF("Lifecycle.ActingMayor.Intro", "I am {{LINK_1}}. I will serve as acting mayor until the next scheduled mayoral election. The elected mayoral platform remains in effect.");
+            DebugLog(transitionMayor
+                ? $"Temporary mayor assigned: mayor={DescribeEntity(mayor, name)}, termYear={state.mayorEffectTermYear}."
+                : $"Acting mayor assigned after democratic transition: mayor={DescribeEntity(mayor, name)}, preservedEffectId={state.mayorEffectId}, termYear={state.mayorEffectTermYear}.");
 
             if (!CustomChirpsBridge.PostLargeChirpFromEntityWithPortraitImage(text, mayor, mayor, portraitImageSource, name))
                 CustomChirpsBridge.PostChirpFromEntity(text, mayor, mayor, name);
@@ -2787,7 +2801,7 @@ namespace Elections.Systems
             state.initialized = true;
             int month = ElectionUtility.CurrentCalendarMonth(World, now);
 
-            if (month <= 7)
+            if (month <= 7 && !state.democraticTransitionCompleted)
             {
                 StartCampaign(ref state, now, accelerated: true, reason: "initial install/load before August");
                 return;
@@ -5862,6 +5876,7 @@ namespace Elections.Systems
                 SchedulePendingMayor(ref state, winnerIndex, winner, effectId, winnerTagId, winnerNegativeSoftened);
             }
 
+            state.democraticTransitionCompleted = true;
             state.stage = ElectionCampaignStage.None;
             state.runoffActive = false;
             state.victoryPartyWinnerIndex = winnerIndex;
@@ -6020,6 +6035,7 @@ namespace Elections.Systems
             string winnerName = GetCandidateChirpName(winner);
 
             ApplyWinnerAsMayor(ref state, now, winnerIndex, winner, effectId, tagId, negativeSoftened, previousMayorPartyIndex);
+            state.democraticTransitionCompleted = true;
             ResetPendingMayorState(ref state);
 
             PostElectionChirp(
@@ -7578,6 +7594,7 @@ namespace Elections.Systems
         private string DescribeState(ElectionState state)
         {
             return $"version={state.version}, initialized={state.initialized}, stage={state.stage}, accelerated={state.acceleratedCycle}, " +
+                   $"democraticTransitionCompleted={state.democraticTransitionCompleted}, " +
                    $"selection={FormatMaybeDate(state.selectionYear, state.selectionMonth)}, poll={FormatMaybeDate(state.pollYear, state.pollMonth)}, election={FormatMaybeDate(state.electionYear, state.electionMonth)}, " +
                    $"candidateCount={state.ActiveCandidateCount}, hasCandidates={state.HasCandidates}, tags={DescribeCandidateTags(state)}, standings={DescribeCandidateStandings(state)}, donations={FormatDonationTotals(state)}, pollVotes={FormatPollVoteTotals(state)}/{state.pollUndecided}, votes={FormatVoteTotals(state)}, mayor={FormatEntity(state.mayor)}, mayorTag={ElectionCandidateTags.Get(state.mayorTagId).Name}";
         }

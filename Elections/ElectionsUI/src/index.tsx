@@ -208,6 +208,7 @@ type MayorSelectedBuilding = {
 type ElectionPanel = {
   enabled: boolean;
   partiesEnabled: boolean;
+  realisticTripsReady: boolean;
   hasState: boolean;
   waitingForPopulation: boolean;
   currentPopulation: number;
@@ -369,6 +370,7 @@ const emptyMayorSelectedBuilding: MayorSelectedBuilding = {
 const defaultPanel: ElectionPanel = {
   enabled: true,
   partiesEnabled: false,
+  realisticTripsReady: true,
   hasState: false,
   waitingForPopulation: false,
   currentPopulation: 0,
@@ -769,7 +771,7 @@ function ElectionsMenuPanel(): ReactElement | null {
     return null;
   }
 
-  const votingSitesEnabled = panel.enabled && !panel.waitingForPopulation;
+  const votingSitesEnabled = panel.enabled && panel.realisticTripsReady && !panel.waitingForPopulation;
   const menuItems: Array<{ section: PanelSection; label: string; title: string; tooltip: string; disabled?: boolean }> = [
     {
       section: "votingSites",
@@ -777,7 +779,7 @@ function ElectionsMenuPanel(): ReactElement | null {
       title: t("UI.Menu.VotingSites.Title", "Voting sites"),
       tooltip: votingSitesEnabled
         ? t("UI.Menu.VotingSites.Tooltip.Enabled", "Show voting locations on the map.")
-        : t("UI.Menu.VotingSites.Tooltip.Disabled", "Voting locations unlock when Elections are enabled and the city reaches the minimum population."),
+        : t("UI.Menu.VotingSites.Tooltip.Disabled", "Voting locations unlock when Elections are enabled, Realistic Trips is available, and the city reaches the minimum population."),
       disabled: !votingSitesEnabled,
     },
     {
@@ -988,7 +990,10 @@ function PanelNotices(props: { panel: ElectionPanel }): ReactElement {
       {!panel.enabled && (
         <div className={styles.notice}>{t("UI.Notice.Disabled", "Elections are disabled in mod settings.")}</div>
       )}
-      {panel.enabled && panel.waitingForPopulation && (
+      {panel.enabled && !panel.realisticTripsReady && (
+        <div className={styles.notice}>{t("UI.Notice.RealisticTripsUnavailable", "Elections require Realistic Trips to be installed, enabled, and loaded before campaigns, dates, and voting trips can run.")}</div>
+      )}
+      {panel.enabled && panel.realisticTripsReady && panel.waitingForPopulation && (
         <div className={styles.notice}>
           {t("UI.Notice.WaitingPopulation", "Elections will start when the city reaches {minimum} population. Current population: {current}.", {
             minimum: formatAmount(panel.minimumPopulation),
@@ -1085,7 +1090,7 @@ function VotingSitesPanel(props: {
   showVotingLocations: boolean;
 }): ReactElement {
   const { panel, showVotingLocations } = props;
-  const canShowLocations = panel.enabled && !panel.waitingForPopulation;
+  const canShowLocations = panel.enabled && panel.realisticTripsReady && !panel.waitingForPopulation;
   const electionDay = panel.stage === "Voting";
 
   return (

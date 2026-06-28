@@ -4,6 +4,7 @@ using Game.Buildings;
 using Game.Citizens;
 using Game.Common;
 using Game.Companies;
+using Game.Economy;
 using Game.Prefabs;
 using Game.Tools;
 using Game.Zones;
@@ -574,7 +575,7 @@ namespace Elections.Systems
                 return false;
             }
 
-            byte workerLevel = GetWorkerLevel(mayor);
+            byte preferredWorkerLevel = GetWorkerLevel(mayor);
             Workshift shift = Workshift.Day;
             float lastCommuteTime = 0f;
             Entity oldWorkplace = Entity.Null;
@@ -583,9 +584,23 @@ namespace Elections.Systems
             {
                 Worker existingWorker = EntityManager.GetComponentData<Worker>(mayor);
                 oldWorkplace = existingWorker.m_Workplace;
-                workerLevel = existingWorker.m_Level;
+                preferredWorkerLevel = existingWorker.m_Level;
                 shift = existingWorker.m_Shift;
                 lastCommuteTime = existingWorker.m_LastCommuteTime;
+            }
+
+            if (oldWorkplace == cityHall &&
+                TryGetEmployeeLevel(cityHall, mayor, out byte existingEmployeeLevel) &&
+                existingEmployeeLevel == preferredWorkerLevel &&
+                HasAvailableWorkplaceAtLevel(cityHall, mayor, existingEmployeeLevel))
+            {
+                return true;
+            }
+
+            if (!TryPickMayorWorkerLevel(cityHall, mayor, preferredWorkerLevel, out byte workerLevel))
+            {
+                ElectionDebug.Log($"Mayor workplace assignment blocked: no compatible City Hall worker slot is available for mayor {FormatEntity(mayor)} at cityHall={FormatEntity(cityHall)}, preferredLevel={preferredWorkerLevel}.");
+                return false;
             }
 
             if (oldWorkplace != Entity.Null && oldWorkplace != cityHall)
@@ -594,7 +609,12 @@ namespace Elections.Systems
                 RemoveEmployee(oldWorkplace, mayor);
             }
 
-            EnsureWorkplaceSpace(cityHall, mayor);
+            EnsureWorkplaceSpace(cityHall, mayor, workerLevel);
+            if (!HasAvailableWorkplaceAtLevel(cityHall, mayor, workerLevel))
+            {
+                ElectionDebug.Log($"Mayor workplace assignment blocked: no compatible City Hall worker slot could be freed for mayor {FormatEntity(mayor)} at cityHall={FormatEntity(cityHall)}, targetLevel={workerLevel}.");
+                return false;
+            }
 
             Worker worker = new Worker
             {
@@ -768,21 +788,20 @@ namespace Elections.Systems
             EntityManager.SetComponentData(rentEvent, new RentersUpdated(property));
         }
 
-        private void EnsureWorkplaceSpace(Entity workplace, Entity protectedWorker)
+        private void EnsureWorkplaceSpace(Entity workplace, Entity protectedWorker, byte targetLevel)
         {
             if (!EntityManager.Exists(workplace) ||
                 !EntityManager.HasBuffer<Employee>(workplace) ||
                 !TryGetComponentData(workplace, out WorkProvider provider) ||
                 provider.m_MaxWorkers <= 0 ||
-                HasEmployee(workplace, protectedWorker))
+                HasAvailableWorkplaceAtLevel(workplace, protectedWorker, targetLevel))
             {
                 return;
             }
 
-            DynamicBuffer<Employee> employees = EntityManager.GetBuffer<Employee>(workplace);
-            while (employees.Length >= provider.m_MaxWorkers)
+            while (!HasAvailableWorkplaceAtLevel(workplace, protectedWorker, targetLevel))
             {
-                Entity firedWorker = FindFireableEmployee(workplace, protectedWorker);
+                Entity firedWorker = FindFireableEmployee(workplace, protectedWorker, targetLevel);
                 if (firedWorker == Entity.Null)
                     return;
 
@@ -797,29 +816,165 @@ namespace Elections.Systems
             }
         }
 
-        private bool HasEmployee(Entity workplace, Entity worker)
+        private bool HasAvailableWorkplaceAtLevel(Entity workplace, Entity protectedWorker, byte level)
         {
+            return TryGetAvailableWorkplaces(workplace, protectedWorker, out Workplaces available) &&
+                   level < 5 &&
+                   available[level] > 0;
+        }
+
+        private bool TryPickMayorWorkerLevel(Entity workplace, Entity mayor, byte preferredLevel, out byte workerLevel)
+        {
+            workerLevel = 0;
+            preferredLevel = (byte)math.clamp(preferredLevel, 0, 4);
+
+            if (TryGetEmployeeLevel(workplace, mayor, out byte existingLevel) &&
+                HasAvailableWorkplaceAtLevel(workplace, mayor, existingLevel))
+            {
+                workerLevel = existingLevel;
+                return true;
+            }
+
+            if (!TryGetAvailableWorkplaces(workplace, mayor, out Workplaces available))
+                return false;
+
+            for (int level = preferredLevel; level >= 0; level--)
+            {
+                if (available[level] > 0)
+                {
+                    workerLevel = (byte)level;
+                    return true;
+                }
+            }
+
+            return TryGetReplaceableEmployeeLevel(workplace, mayor, preferredLevel, out workerLevel);
+        }
+
+        private bool TryGetAvailableWorkplaces(Entity workplace, Entity protectedWorker, out Workplaces available)
+        {
+            available = default;
+            if (!EntityManager.Exists(workplace) ||
+                !EntityManager.HasBuffer<Employee>(workplace) ||
+                !TryGetComponentData(workplace, out WorkProvider provider) ||
+                !TryGetWorkplaceData(workplace, out WorkplaceData workplaceData))
+            {
+                return false;
+            }
+
+            int buildingLevel = GetBuildingLevel(workplace);
+            available = EconomyUtils.CalculateNumberOfWorkplaces(provider.m_MaxWorkers, workplaceData.m_Complexity, buildingLevel);
+            DynamicBuffer<Employee> employees = EntityManager.GetBuffer<Employee>(workplace);
+            for (int i = 0; i < employees.Length; i++)
+            {
+                Employee employee = employees[i];
+                if (employee.m_Worker == protectedWorker)
+                    continue;
+
+                if (employee.m_Level >= 5 ||
+                    !IsValidCitizen(employee.m_Worker) ||
+                    !TryGetComponentData(employee.m_Worker, out Worker worker) ||
+                    worker.m_Workplace != workplace)
+                {
+                    continue;
+                }
+
+                available[employee.m_Level]--;
+            }
+
+            return true;
+        }
+
+        private bool TryGetWorkplaceData(Entity workplace, out WorkplaceData workplaceData)
+        {
+            workplaceData = default;
+            if (!TryGetComponentData(workplace, out PrefabRef prefabRef) ||
+                !TryGetComponentData(prefabRef.m_Prefab, out workplaceData))
+            {
+                return false;
+            }
+
+            if (EntityManager.HasBuffer<InstalledUpgrade>(workplace))
+            {
+                DynamicBuffer<InstalledUpgrade> upgrades = EntityManager.GetBuffer<InstalledUpgrade>(workplace, true);
+                UpgradeUtils.CombineStats(EntityManager, ref workplaceData, upgrades);
+            }
+
+            return true;
+        }
+
+        private int GetBuildingLevel(Entity building)
+        {
+            if (TryGetComponentData(building, out PrefabRef prefabRef) &&
+                TryGetComponentData(prefabRef.m_Prefab, out SpawnableBuildingData spawnableBuildingData))
+            {
+                return spawnableBuildingData.m_Level;
+            }
+
+            return 1;
+        }
+
+        private bool TryGetEmployeeLevel(Entity workplace, Entity worker, out byte level)
+        {
+            level = 0;
             if (!EntityManager.Exists(workplace) || !EntityManager.HasBuffer<Employee>(workplace))
                 return false;
 
             DynamicBuffer<Employee> employees = EntityManager.GetBuffer<Employee>(workplace);
             for (int i = 0; i < employees.Length; i++)
             {
-                if (employees[i].m_Worker == worker)
+                Employee employee = employees[i];
+                if (employee.m_Worker == worker)
+                {
+                    level = employee.m_Level;
                     return true;
+                }
             }
 
             return false;
         }
 
-        private Entity FindFireableEmployee(Entity workplace, Entity protectedWorker)
+        private bool TryGetReplaceableEmployeeLevel(Entity workplace, Entity protectedWorker, byte preferredLevel, out byte level)
+        {
+            level = 0;
+            Entity bestWorker = Entity.Null;
+            byte bestLevel = 0;
+
+            if (!EntityManager.Exists(workplace) || !EntityManager.HasBuffer<Employee>(workplace))
+                return false;
+
+            DynamicBuffer<Employee> employees = EntityManager.GetBuffer<Employee>(workplace);
+            for (int i = 0; i < employees.Length; i++)
+            {
+                Employee employee = employees[i];
+                if (employee.m_Worker == protectedWorker ||
+                    employee.m_Level > preferredLevel ||
+                    employee.m_Level >= 5)
+                {
+                    continue;
+                }
+
+                if (bestWorker == Entity.Null || employee.m_Level > bestLevel)
+                {
+                    bestWorker = employee.m_Worker;
+                    bestLevel = employee.m_Level;
+                }
+            }
+
+            if (bestWorker == Entity.Null)
+                return false;
+
+            level = bestLevel;
+            return true;
+        }
+
+        private Entity FindFireableEmployee(Entity workplace, Entity protectedWorker, byte targetLevel)
         {
             DynamicBuffer<Employee> employees = EntityManager.GetBuffer<Employee>(workplace);
             for (int i = employees.Length - 1; i >= 0; i--)
             {
-                Entity worker = employees[i].m_Worker;
-                if (worker != protectedWorker)
-                    return worker;
+                Employee employee = employees[i];
+                if (employee.m_Worker != protectedWorker && employee.m_Level == targetLevel)
+                    return employee.m_Worker;
             }
 
             return Entity.Null;

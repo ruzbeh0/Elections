@@ -2212,7 +2212,14 @@ function PartyCard(props: { party: Party; onEditTags: (partyIndex: number) => vo
 function PartyTagEditorPanel(props: { party: Party; partyTags: PartyTag[]; onCancel: () => void }): ReactElement {
   const { party, partyTags } = props;
   const availableTags = partyTags.filter((tag) => tag.id > 0);
-  const initialTagIds = party.tags.map((tag) => tag.id).filter((id) => id > 0);
+  const initialTagKey = party.tags
+    .map((tag) => tag.id)
+    .filter((id) => id > 0)
+    .join(",");
+  const initialTagIds = useMemo(
+    () => initialTagKey.length === 0 ? [] : initialTagKey.split(",").map((id) => Number(id)),
+    [initialTagKey]
+  );
   const [selectedIds, setSelectedIds] = useState<number[]>(initialTagIds);
   const selectedTags = selectedIds
     .map((id) => findPartyTagById(availableTags, id))
@@ -2232,7 +2239,7 @@ function PartyTagEditorPanel(props: { party: Party; partyTags: PartyTag[]; onCan
 
   useEffect(() => {
     setSelectedIds(initialTagIds);
-  }, [party.index]);
+  }, [party.index, initialTagIds]);
 
   const toggleTag = (tag: PartyTag) => {
     setSelectedIds((current) => {

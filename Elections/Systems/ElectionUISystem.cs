@@ -541,15 +541,12 @@ namespace Elections.Systems
         private void WriteParty(IJsonWriter writer, ElectionState state, int partyIndex, int currentYear)
         {
             bool canReplaceTag = state.stage == ElectionCampaignStage.None &&
-                                 currentYear > 0 &&
-                                 state.GetPartyLastTagReplacementYear(partyIndex) != currentYear;
+                                 currentYear > 0;
             string disabledReason = state.stage != ElectionCampaignStage.None
                 ? L("Panel.Party.Replace.Disabled.Cycle", "Party tags can only be replaced outside the election cycle.")
                 : currentYear <= 0
                     ? L("Panel.Party.Replace.Disabled.NoYear", "Party tag replacement needs the current city year.")
-                    : state.GetPartyLastTagReplacementYear(partyIndex) == currentYear
-                        ? L("Panel.Party.Replace.Disabled.UsedYear", "This party has already replaced its tags this year.")
-                        : string.Empty;
+                    : string.Empty;
 
             writer.TypeBegin("ElectionParty");
             writer.PropertyName("index"); writer.Write(partyIndex);

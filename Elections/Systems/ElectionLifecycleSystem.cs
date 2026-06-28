@@ -470,13 +470,6 @@ namespace Elections.Systems
             }
 
             ElectionUtility.GetCurrentCalendarDate(World, now, out int year, out _, out _);
-            if (state.GetPartyLastTagReplacementYear(partyIndex) == year)
-            {
-                PostElectionChirp(LF("Lifecycle.PartyTags.AlreadyReplacedSetThisYear", "{0} already replaced party tags this year.", state.GetPartyName(partyIndex)), Entity.Null);
-                EntityManager.SetComponentData(stateEntity, state);
-                return;
-            }
-
             if (!TryParsePartyTagSelection(tagIds, out int tagId1, out int tagId2, out int tagId3))
             {
                 PostElectionChirp(L("Lifecycle.PartyTags.ChooseExactlyThree", "Choose exactly three party tags before saving."), Entity.Null);
@@ -1674,6 +1667,7 @@ namespace Elections.Systems
 
         private void RepairLoadedState(ref ElectionState state, DateTime now)
         {
+            RepairDemocraticTransitionCompletion(ref state);
             EnsureTemporaryMayor(ref state, now);
             RepairLegacyMayorEffectId(ref state, now);
 
@@ -1704,6 +1698,44 @@ namespace Elections.Systems
                 if (month >= GetRegularCampaignStartMonth())
                     StartCampaign(ref state, now, accelerated: false, reason: "repair empty inactive state during regular campaign season");
             }
+        }
+
+        private void RepairDemocraticTransitionCompletion(ref ElectionState state)
+        {
+            if (state.democraticTransitionCompleted || !HasCompletedMayorElectionState(state))
+                return;
+
+            state.democraticTransitionCompleted = true;
+            DebugLog($"Democratic transition marked complete from existing mayoral state: mayor={FormatEntity(state.mayor)}, mayorEffectId={state.mayorEffectId}, pendingMayor={FormatEntity(state.pendingMayor)}, electionDayKey={state.electionDayKey}, votes={FormatVoteTotals(state)}.");
+        }
+
+        private static bool HasCompletedMayorElectionState(ElectionState state)
+        {
+            if (state.pendingMayor != Entity.Null &&
+                (state.pendingMayorEffectId > 0 || state.pendingMayorTermYear > 0))
+            {
+                return true;
+            }
+
+            if (state.mayorEffectId > 0 || state.appliedEffectId > 0)
+            {
+                return true;
+            }
+
+            if (state.stage != ElectionCampaignStage.None)
+                return false;
+
+            if (state.electionDayKey > 0 &&
+                (state.voteArrivals > 0 ||
+                    state.votesA + state.votesB + state.votesC + state.votesD > 0))
+            {
+                return true;
+            }
+
+            return state.mayor != Entity.Null &&
+                   state.mayorTermYear > 0 &&
+                   state.electionYear > 0 &&
+                   state.electionMonth > 0;
         }
 
         private static void EnsureLegislationState(ref ElectionState state)
@@ -2753,8 +2785,11 @@ namespace Elections.Systems
 
         private void EnsureTemporaryMayor(ref ElectionState state, DateTime now)
         {
-            if (IsValidResidentEntity(state.mayor))
+            if (IsValidResidentEntity(state.mayor) ||
+                (state.democraticTransitionCompleted && IsExistingResidentMayorEntity(state.mayor)))
+            {
                 return;
+            }
 
             if (!TryPickTemporaryMayor(now, out Entity mayor))
             {
@@ -2793,6 +2828,20 @@ namespace Elections.Systems
 
             if (!CustomChirpsBridge.PostLargeChirpFromEntityWithPortraitImage(text, mayor, mayor, portraitImageSource, name))
                 CustomChirpsBridge.PostChirpFromEntity(text, mayor, mayor, name);
+        }
+
+        private bool IsExistingResidentMayorEntity(Entity entity)
+        {
+            if (entity == Entity.Null ||
+                !EntityManager.Exists(entity) ||
+                !EntityManager.HasComponent<Citizen>(entity) ||
+                EntityManager.HasComponent<Deleted>(entity) ||
+                EntityManager.HasComponent<Temp>(entity))
+            {
+                return false;
+            }
+
+            return ElectionUtility.IsEligibleResident(EntityManager, entity, EntityManager.GetComponentData<Citizen>(entity));
         }
 
         private void InitializeState(ref ElectionState state, DateTime now)

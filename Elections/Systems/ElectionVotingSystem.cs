@@ -25,6 +25,7 @@ namespace Elections.Systems
         private const int kMaxSocialVoteChirpsPerElection = 6;
         private const float kMinVotingVisitMinutes = 5f;
         private const float kMaxVotingVisitMinutes = 40f;
+        private const int kVotingTripRequestScanBatchSize = 4096;
 
         private EntityQuery m_StateQuery;
         private EntityQuery m_AvailableCitizenQuery;
@@ -38,6 +39,8 @@ namespace Elections.Systems
         private PrefabSystem m_PrefabSystem;
         private bool m_LoggedMissingRealisticTrips;
         private bool m_LoggedNoPollingPlaces;
+        private int m_VotingTripRequestCursor;
+        private int m_VotingTripRequestElectionDayKey;
         private int m_SocialVoteChirpDayKey;
         private int m_SocialVoteChirpCount;
         private readonly List<PollingPlaceInfo> m_PollingPlaces = new List<PollingPlaceInfo>(64);
@@ -220,19 +223,36 @@ namespace Elections.Systems
             float weightedAvailableHoursTotal = 0f;
 
             using (NativeArray<Entity> citizens = m_AvailableCitizenQuery.ToEntityArray(Allocator.Temp))
-            using (NativeArray<Citizen> citizenData = m_AvailableCitizenQuery.ToComponentDataArray<Citizen>(Allocator.Temp))
-            using (NativeArray<CurrentBuilding> currentBuildings = m_AvailableCitizenQuery.ToComponentDataArray<CurrentBuilding>(Allocator.Temp))
             {
-                for (int i = 0; i < citizens.Length; i++)
+                if (citizens.Length == 0)
                 {
+                    m_VotingTripRequestCursor = 0;
+                    return;
+                }
+
+                if (m_VotingTripRequestElectionDayKey != state.electionDayKey)
+                {
+                    m_VotingTripRequestElectionDayKey = state.electionDayKey;
+                    m_VotingTripRequestCursor = 0;
+                }
+
+                int scanCount = math.min(citizens.Length, kVotingTripRequestScanBatchSize);
+                int startIndex = math.clamp(m_VotingTripRequestCursor, 0, citizens.Length - 1);
+                float scanIntervalMultiplier = citizens.Length > scanCount
+                    ? citizens.Length / (float)scanCount
+                    : 1f;
+
+                for (int offset = 0; offset < scanCount; offset++)
+                {
+                    int i = (startIndex + offset) % citizens.Length;
                     Entity citizen = citizens[i];
-                    Citizen data = citizenData[i];
                     if (EntityManager.HasComponent<ElectionVoteTrip>(citizen))
                     {
                         alreadyTrackedCount++;
                         continue;
                     }
 
+                    Citizen data = EntityManager.GetComponentData<Citizen>(citizen);
                     if (!ElectionUtility.IsEligibleVoterResident(EntityManager, citizen, data))
                         continue;
 
@@ -283,14 +303,15 @@ namespace Elections.Systems
                         adjustedWorkWindowCount++;
 
                     float dailyProbability = math.saturate(dailyTurnout / 100f * turnoutMultiplier);
-                    float weightedUpdateHours = updateHours * votingHourChanceWeight;
+                    float weightedUpdateHours = updateHours * scanIntervalMultiplier * votingHourChanceWeight;
                     float chancePerUpdate = GetElectionChancePerUpdate(dailyProbability, weightedUpdateHours, weightedAvailableHours);
                     Unity.Mathematics.Random random = CreateRandom(citizen, state.electionDayKey, (int)m_SimulationSystem.frameIndex);
                     if (random.NextFloat() > chancePerUpdate)
                         continue;
 
                     randomSelectedCount++;
-                    if (!TryPickPollingPlace(citizen, currentBuildings[i], pollingPlaces, random, out Entity pollingPlace))
+                    CurrentBuilding currentBuilding = EntityManager.GetComponentData<CurrentBuilding>(citizen);
+                    if (!TryPickPollingPlace(citizen, currentBuilding, pollingPlaces, random, out Entity pollingPlace))
                     {
                         rejectedByBridgeCount++;
                         continue;
@@ -321,11 +342,13 @@ namespace Elections.Systems
                     requestedCount++;
                 }
 
+                m_VotingTripRequestCursor = (startIndex + scanCount) % citizens.Length;
+
                 int chanceEligibleCount = math.max(0, eligibleCount - blockedByWorkCount - noAvailableWorkWindowCount);
                 if (ElectionDebug.Enabled)
                 {
                     float averageWeightedAvailableHours = chanceEligibleCount > 0 ? weightedAvailableHoursTotal / chanceEligibleCount : 0f;
-                    ElectionDebug.Log($"Voting trip request update: date={ElectionUtility.FormatCurrentDate(World, now)} {now:HH:mm}, pollingPlaces={pollingPlaces.Count}, availableResidents={citizens.Length}, eligibleResidents={eligibleCount}, eligibleByAge=teen:{teenEligibleCount}/adult:{adultEligibleCount}/elderly:{elderlyEligibleCount}, dailyTurnoutByAge=teen:{teenDailyTurnout}/adult:{adultDailyTurnout}/elderly:{elderlyDailyTurnout}, dailyTurnoutBonusByEducation=uneducated:{state.uneducatedTurnoutBonusPercent}/poorlyEducated:{state.educatedTurnoutBonusPercent}/educatedPlus:{state.civicForumTurnoutBonusPercent}, votingHours={votingHours:0.##}, weightedVotingHours={weightedVotingHours:0.##}, averageWeightedAvailableHours={averageWeightedAvailableHours:0.##}, votingHourChanceWeight={votingHourChanceWeight:0.###}, selectedByChance={randomSelectedCount}, alreadyTracked={alreadyTrackedCount}, blockedByWork={blockedByWorkCount}, workWindowAdjusted={adjustedWorkWindowCount}, noAvailableWorkWindow={noAvailableWorkWindowCount}, rejectedByBridge={rejectedByBridgeCount}, requestedThisUpdate={requestedCount}, totalRequests={state.voteRequests}, holidayMode={sundayMode}, visitDurationMinutes={kMinVotingVisitMinutes:0}-{kMaxVotingVisitMinutes:0}.");
+                    ElectionDebug.Log($"Voting trip request update: date={ElectionUtility.FormatCurrentDate(World, now)} {now:HH:mm}, pollingPlaces={pollingPlaces.Count}, availableResidents={citizens.Length}, scannedResidents={scanCount}, nextScanIndex={m_VotingTripRequestCursor}, scanIntervalMultiplier={scanIntervalMultiplier:0.##}, eligibleResidents={eligibleCount}, eligibleByAge=teen:{teenEligibleCount}/adult:{adultEligibleCount}/elderly:{elderlyEligibleCount}, dailyTurnoutByAge=teen:{teenDailyTurnout}/adult:{adultDailyTurnout}/elderly:{elderlyDailyTurnout}, dailyTurnoutBonusByEducation=uneducated:{state.uneducatedTurnoutBonusPercent}/poorlyEducated:{state.educatedTurnoutBonusPercent}/educatedPlus:{state.civicForumTurnoutBonusPercent}, votingHours={votingHours:0.##}, weightedVotingHours={weightedVotingHours:0.##}, averageWeightedAvailableHours={averageWeightedAvailableHours:0.##}, votingHourChanceWeight={votingHourChanceWeight:0.###}, selectedByChance={randomSelectedCount}, alreadyTracked={alreadyTrackedCount}, blockedByWork={blockedByWorkCount}, workWindowAdjusted={adjustedWorkWindowCount}, noAvailableWorkWindow={noAvailableWorkWindowCount}, rejectedByBridge={rejectedByBridgeCount}, requestedThisUpdate={requestedCount}, totalRequests={state.voteRequests}, holidayMode={sundayMode}, visitDurationMinutes={kMinVotingVisitMinutes:0}-{kMaxVotingVisitMinutes:0}.");
                 }
             }
         }

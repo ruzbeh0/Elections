@@ -49,7 +49,7 @@ namespace Elections.Systems
 
         public override int GetUpdateInterval(SystemUpdatePhase phase)
         {
-            return 16;
+            return 64;
         }
 
         protected override void OnCreate()
@@ -502,7 +502,7 @@ namespace Elections.Systems
             writer.PropertyName("partyName"); writer.Write(partiesEnabled ? state.GetPartyName(partyIndex) : string.Empty);
             writer.PropertyName("partyColor"); writer.Write(partiesEnabled ? FormatPartyColor(state.GetPartyColor(partyIndex)) : string.Empty);
             writer.PropertyName("partyReputation"); writer.Write(partiesEnabled ? state.GetPartyReputation(partyIndex) : 0);
-            writer.PropertyName("portrait"); writer.Write(CandidatePortraitCatalog.GetPortraitImageSource(EntityManager, candidate, portraitIndex));
+            writer.PropertyName("portrait"); writer.Write(CandidatePortraitCatalog.GetPortraitUiImageSource(EntityManager, candidate, portraitIndex));
             writer.PropertyName("canFocus"); writer.Write(canFocus);
             writer.PropertyName("bio"); writer.Write(GetCandidateBio(state, index));
             writer.PropertyName("tagName"); writer.Write(tag.Name);
@@ -588,11 +588,14 @@ namespace Elections.Systems
 
         private static int GetPartyCountForUI(ElectionState state)
         {
-            if (state.HasCandidates)
-                return state.ActiveCandidateCount;
-
             int configuredCount = Mod.m_Setting?.CandidateCount ?? ElectionState.DefaultCandidateCount;
-            return ElectionState.NormalizeCandidateCount(state.candidateCount > 0 ? state.candidateCount : configuredCount);
+            int partyCount = configuredCount;
+            if (state.runoffOriginalCandidateCount > 0)
+                partyCount = math.max(partyCount, state.runoffOriginalCandidateCount);
+            else if (state.candidateCount > 0)
+                partyCount = math.max(partyCount, state.candidateCount);
+
+            return ElectionState.NormalizeCandidateCount(partyCount);
         }
 
         private static string FormatPartyColor(int color)
@@ -641,7 +644,7 @@ namespace Elections.Systems
             writer.PropertyName("mayorPartyColor"); writer.Write(partiesEnabled && ElectionState.IsPartyIndex(state.mayorPartyIndex) ? FormatPartyColor(state.GetPartyColor(state.mayorPartyIndex)) : string.Empty);
             writer.PropertyName("mayorPartyReputation"); writer.Write(partiesEnabled && ElectionState.IsPartyIndex(state.mayorPartyIndex) ? state.GetPartyReputation(state.mayorPartyIndex) : 0);
             writer.PropertyName("mayorPortrait"); writer.Write(canFocus
-                ? CandidatePortraitCatalog.GetPortraitImageSource(EntityManager, state.mayor, GetMayorPortraitIndex(state))
+                ? CandidatePortraitCatalog.GetPortraitUiImageSource(EntityManager, state.mayor, GetMayorPortraitIndex(state))
                 : string.Empty);
             writer.PropertyName("mayorCanFocus"); writer.Write(canFocus);
             writer.PropertyName("mayorEffectName"); writer.Write(effect.Name);

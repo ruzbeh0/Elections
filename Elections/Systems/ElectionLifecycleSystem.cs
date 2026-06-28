@@ -114,6 +114,7 @@ namespace Elections.Systems
         private struct CandidateSlotSnapshot
         {
             public Entity candidate;
+            public int partyIndex;
             public int effectId;
             public int age;
             public int education;
@@ -130,19 +131,6 @@ namespace Elections.Systems
             public int platformChirpDayKey;
             public int platformChirpMinute;
             public long platformChirpUtcTicks;
-        }
-
-        private struct PartySlotSnapshot
-        {
-            public string name;
-            public int color;
-            public int reputation;
-            public int consecutiveTerms;
-            public int wins;
-            public int lastTagReplacementYear;
-            public int tagId1;
-            public int tagId2;
-            public int tagId3;
         }
 
         private struct PollSampleCandidate
@@ -1577,6 +1565,10 @@ namespace Elections.Systems
                 campaignDonationAmount = ElectionDonationTiers.FixedDonationAmount,
                 campaignBribeAmount = BribeAmount,
                 candidateCount = ElectionState.DefaultCandidateCount,
+                candidateAPartyIndex = 0,
+                candidateBPartyIndex = 1,
+                candidateCPartyIndex = 2,
+                candidateDPartyIndex = 3,
                 candidateCPortraitIndex = -1,
                 candidateDPortraitIndex = -1,
                 candidateATagId = ElectionCandidateTags.None,
@@ -1887,9 +1879,13 @@ namespace Elections.Systems
 
         private static int GetManagedPartyCount(ElectionState state)
         {
-            return state.HasCandidates
-                ? state.ActiveCandidateCount
-                : GetConfiguredCandidateCount();
+            int count = GetConfiguredCandidateCount();
+            if (state.runoffOriginalCandidateCount > 0)
+                count = math.max(count, state.runoffOriginalCandidateCount);
+            else if (state.candidateCount > 0)
+                count = math.max(count, state.candidateCount);
+
+            return ElectionState.NormalizeCandidateCount(count);
         }
 
         private static bool IsManagedPartyIndex(ElectionState state, int partyIndex)
@@ -1902,6 +1898,8 @@ namespace Elections.Systems
             state.candidateCount = ElectionState.NormalizeCandidateCount(state.candidateCount <= 0 ? ElectionState.DefaultCandidateCount : state.candidateCount);
             for (int i = 0; i < ElectionState.MaxCandidateCount; i++)
             {
+                state.SetCandidatePartyIndex(i, state.GetCandidatePartyIndex(i));
+
                 if (string.IsNullOrWhiteSpace(state.GetPartyName(i)))
                     state.SetPartyName(i, ElectionPartyTags.GetDefaultName(i));
 
@@ -1928,6 +1926,8 @@ namespace Elections.Systems
                 state.SetPartyWins(i, state.GetPartyWins(i));
             }
 
+            RepairRunoffCandidatePartyIndexesFromCopiedPartySlots(ref state);
+            RepairDuplicatedDefaultPartySlots(ref state);
             state.mayorPartyIndex = NormalizeKnownPartyIndex(state, state.mayorPartyIndex, state.mayor);
             state.outgoingMayorPartyIndex = NormalizeKnownPartyIndex(state, state.outgoingMayorPartyIndex, state.outgoingMayor);
         }
@@ -1953,21 +1953,73 @@ namespace Elections.Systems
             return sum != 0;
         }
 
-        private static int NormalizeKnownPartyIndex(ElectionState state, int partyIndex, Entity citizen)
+        private static void RepairRunoffCandidatePartyIndexesFromCopiedPartySlots(ref ElectionState state)
         {
-            if (ElectionState.IsPartyIndex(partyIndex))
-                return partyIndex;
+            int activeCandidateCount = state.ActiveCandidateCount;
+            if (state.runoffOriginalCandidateCount <= activeCandidateCount || activeCandidateCount <= 0)
+                return;
 
-            if (citizen == Entity.Null)
-                return -1;
+            for (int candidateSlot = 0; candidateSlot < activeCandidateCount; candidateSlot++)
+            {
+                if (state.GetCandidatePartyIndex(candidateSlot) != candidateSlot)
+                    continue;
 
+                int copiedPartySlot = GetDefaultPartySlotByNameAndColor(state.GetPartyName(candidateSlot), state.GetPartyColor(candidateSlot));
+                if (copiedPartySlot >= 0 && copiedPartySlot != candidateSlot)
+                    state.SetCandidatePartyIndex(candidateSlot, copiedPartySlot);
+            }
+        }
+
+        private static void RepairDuplicatedDefaultPartySlots(ref ElectionState state)
+        {
+            for (int slot = 0; slot < ElectionState.MaxCandidateCount; slot++)
+            {
+                string expectedName = ElectionPartyTags.GetDefaultName(slot);
+                if (state.GetPartyName(slot) == expectedName)
+                    continue;
+
+                int copiedPartySlot = GetDefaultPartySlotByNameAndColor(state.GetPartyName(slot), state.GetPartyColor(slot));
+                if (copiedPartySlot >= 0 && copiedPartySlot != slot)
+                {
+                    state.SetPartyName(slot, expectedName);
+                    state.SetPartyColor(slot, ElectionPartyTags.GetDefaultColor(slot));
+                    state.SetPartyReputation(slot, ElectionPartyTags.DefaultReputation);
+                    state.SetPartyConsecutiveTerms(slot, 0);
+                    state.SetPartyWins(slot, 0);
+                    state.SetPartyLastTagReplacementYear(slot, 0);
+                    for (int tagSlot = 0; tagSlot < ElectionPartyTags.TagsPerParty; tagSlot++)
+                        state.SetPartyTagId(slot, tagSlot, ElectionPartyTags.GetDefaultTagId(slot, tagSlot));
+                    ElectionDebug.Log($"Repaired duplicated default party slot: slot={slot}, duplicateOf={copiedPartySlot}, restoredName={expectedName}.");
+                }
+            }
+        }
+
+        private static int GetDefaultPartySlotByNameAndColor(string name, int color)
+        {
             for (int i = 0; i < ElectionState.MaxCandidateCount; i++)
             {
-                if (state.GetCandidate(i) == citizen)
+                if (name == ElectionPartyTags.GetDefaultName(i) &&
+                    color == ElectionPartyTags.GetDefaultColor(i))
+                {
                     return i;
+                }
             }
 
             return -1;
+        }
+
+        private static int NormalizeKnownPartyIndex(ElectionState state, int partyIndex, Entity citizen)
+        {
+            if (citizen != Entity.Null)
+            {
+                for (int i = 0; i < ElectionState.MaxCandidateCount; i++)
+                {
+                    if (state.GetCandidate(i) == citizen)
+                        return state.GetCandidatePartyIndex(i);
+                }
+            }
+
+            return ElectionState.IsPartyIndex(partyIndex) ? partyIndex : -1;
         }
 
         private static string SanitizePartyName(string name, string fallback)
@@ -3210,6 +3262,7 @@ namespace Elections.Systems
             {
                 Entity candidate = i < candidateCount ? selectedCandidates[i] : Entity.Null;
                 state.SetCandidate(i, candidate);
+                state.SetCandidatePartyIndex(i, i);
                 state.SetCandidateEffectId(i, candidate == Entity.Null ? 0 : PickUniqueCandidateEffect(state, candidate, now, i));
                 if (candidate != Entity.Null)
                 {
@@ -5334,30 +5387,36 @@ namespace Elections.Systems
 
             int candidateCount = state.ActiveCandidateCount;
             int[] reputationDeltas = GetPartyElectionReputationDeltas(state, winnerIndex, candidateCount);
+            bool[] processedParties = new bool[ElectionState.MaxCandidateCount];
             for (int i = 0; i < candidateCount; i++)
             {
-                int beforeReputation = state.GetPartyReputation(i);
+                int partyIndex = state.GetCandidatePartyIndex(i);
+                if (!ElectionState.IsPartyIndex(partyIndex) || processedParties[partyIndex])
+                    continue;
+
+                processedParties[partyIndex] = true;
+                int beforeReputation = state.GetPartyReputation(partyIndex);
                 int reputationDelta = reputationDeltas[i];
                 int consecutiveTerms;
                 if (i == winnerIndex)
                 {
-                    consecutiveTerms = previousMayorPartyIndex == i
-                        ? state.GetPartyConsecutiveTerms(i) + 1
+                    consecutiveTerms = previousMayorPartyIndex == partyIndex
+                        ? state.GetPartyConsecutiveTerms(partyIndex) + 1
                         : 1;
-                    state.SetPartyConsecutiveTerms(i, consecutiveTerms);
-                    state.SetPartyWins(i, state.GetPartyWins(i) + 1);
+                    state.SetPartyConsecutiveTerms(partyIndex, consecutiveTerms);
+                    state.SetPartyWins(partyIndex, state.GetPartyWins(partyIndex) + 1);
                 }
                 else
                 {
                     consecutiveTerms = 0;
-                    state.SetPartyConsecutiveTerms(i, 0);
+                    state.SetPartyConsecutiveTerms(partyIndex, 0);
                 }
 
-                state.AddPartyReputation(i, reputationDelta);
-                ElectionDebug.Log($"Party election reputation changed: party={i}:{state.GetPartyName(i)}, result={(i == winnerIndex ? "win" : "nonwinner")}, votes={state.GetCandidateVotes(i)}, delta={reputationDelta}, reputation={beforeReputation}->{state.GetPartyReputation(i)}, consecutiveTerms={consecutiveTerms}, wins={state.GetPartyWins(i)}.");
+                state.AddPartyReputation(partyIndex, reputationDelta);
+                ElectionDebug.Log($"Party election reputation changed: candidate={i}, party={partyIndex}:{state.GetPartyName(partyIndex)}, result={(i == winnerIndex ? "win" : "nonwinner")}, votes={state.GetCandidateVotes(i)}, delta={reputationDelta}, reputation={beforeReputation}->{state.GetPartyReputation(partyIndex)}, consecutiveTerms={consecutiveTerms}, wins={state.GetPartyWins(partyIndex)}.");
             }
 
-            state.mayorPartyIndex = winnerIndex;
+            state.mayorPartyIndex = state.GetCandidatePartyIndex(winnerIndex);
         }
 
         private static int[] GetPartyElectionReputationDeltas(ElectionState state, int winnerIndex, int candidateCount)
@@ -5521,9 +5580,6 @@ namespace Elections.Systems
         private void CompactRunoffFinalists(ref ElectionState state, int firstOriginalIndex, int secondOriginalIndex, int[] endorsementBonuses)
         {
             CandidateSlotSnapshot[] candidateSnapshots = CaptureCandidateSlots(state);
-            PartySlotSnapshot[] partySnapshots = CapturePartySlots(state);
-            int originalMayorPartyIndex = state.mayorPartyIndex;
-            int originalOutgoingMayorPartyIndex = state.outgoingMayorPartyIndex;
             int originalEndorsementIndex = state.mayorEndorsementCandidateIndex;
             Entity originalEndorsementCandidate = state.mayorEndorsementCandidate;
 
@@ -5538,11 +5594,6 @@ namespace Elections.Systems
 
             if (ArePartiesEnabled())
             {
-                CopyPartySlot(ref state, 0, partySnapshots[firstOriginalIndex]);
-                CopyPartySlot(ref state, 1, partySnapshots[secondOriginalIndex]);
-                int preservationSlot = ElectionState.MinCandidateCount;
-                state.mayorPartyIndex = RemapPartyIndexForRunoff(ref state, originalMayorPartyIndex, firstOriginalIndex, secondOriginalIndex, partySnapshots, ref preservationSlot);
-                state.outgoingMayorPartyIndex = RemapPartyIndexForRunoff(ref state, originalOutgoingMayorPartyIndex, firstOriginalIndex, secondOriginalIndex, partySnapshots, ref preservationSlot);
                 if (ElectionState.IsPartyIndex(state.mayorPartyIndex) && state.appliedEffectPartySignature != 0)
                     state.appliedEffectPartySignature = state.GetPartyPlatformSignature(state.mayorPartyIndex);
             }
@@ -5567,6 +5618,7 @@ namespace Elections.Systems
             return new CandidateSlotSnapshot
             {
                 candidate = state.GetCandidate(index),
+                partyIndex = state.GetCandidatePartyIndex(index),
                 effectId = state.GetCandidateEffectId(index),
                 age = state.GetCandidateAge(index),
                 education = state.GetCandidateEducation(index),
@@ -5589,6 +5641,7 @@ namespace Elections.Systems
         private static void RestoreCandidateSlot(ref ElectionState state, int index, CandidateSlotSnapshot snapshot, int supportModifierPercent)
         {
             state.SetCandidate(index, snapshot.candidate);
+            state.SetCandidatePartyIndex(index, snapshot.partyIndex);
             state.SetCandidateEffectId(index, snapshot.effectId);
             state.SetCandidateProfile(index, snapshot.age, snapshot.education, snapshot.workType, snapshot.wealth);
             state.SetCandidatePortraitIndex(index, snapshot.portraitIndex);
@@ -5613,6 +5666,7 @@ namespace Elections.Systems
         private static void ClearCandidateSlot(ref ElectionState state, int index)
         {
             state.SetCandidate(index, Entity.Null);
+            state.SetCandidatePartyIndex(index, index);
             state.SetCandidateEffectId(index, 0);
             state.SetCandidateProfile(index, 0, 0, 0, 0);
             state.SetCandidatePortraitIndex(index, -1);
@@ -5648,74 +5702,6 @@ namespace Elections.Systems
                 ? endorsementBonuses[finalistSlot]
                 : 0;
             return ElectionState.ClampCandidateSupportModifierPercent(snapshot.supportModifierPercent + bonus);
-        }
-
-        private static PartySlotSnapshot[] CapturePartySlots(ElectionState state)
-        {
-            PartySlotSnapshot[] snapshots = new PartySlotSnapshot[ElectionState.MaxCandidateCount];
-            for (int i = 0; i < ElectionState.MaxCandidateCount; i++)
-                snapshots[i] = CapturePartySlot(state, i);
-
-            return snapshots;
-        }
-
-        private static PartySlotSnapshot CapturePartySlot(ElectionState state, int index)
-        {
-            return new PartySlotSnapshot
-            {
-                name = state.GetPartyName(index),
-                color = state.GetPartyColor(index),
-                reputation = state.GetPartyReputation(index),
-                consecutiveTerms = state.GetPartyConsecutiveTerms(index),
-                wins = state.GetPartyWins(index),
-                lastTagReplacementYear = state.GetPartyLastTagReplacementYear(index),
-                tagId1 = state.GetPartyTagId(index, 0),
-                tagId2 = state.GetPartyTagId(index, 1),
-                tagId3 = state.GetPartyTagId(index, 2)
-            };
-        }
-
-        private static void CopyPartySlot(ref ElectionState state, int targetIndex, PartySlotSnapshot snapshot)
-        {
-            state.SetPartyName(targetIndex, snapshot.name);
-            state.SetPartyColor(targetIndex, snapshot.color);
-            state.SetPartyReputation(targetIndex, snapshot.reputation);
-            state.SetPartyConsecutiveTerms(targetIndex, snapshot.consecutiveTerms);
-            state.SetPartyWins(targetIndex, snapshot.wins);
-            state.SetPartyLastTagReplacementYear(targetIndex, snapshot.lastTagReplacementYear);
-            state.SetPartyTagId(targetIndex, 0, snapshot.tagId1);
-            state.SetPartyTagId(targetIndex, 1, snapshot.tagId2);
-            state.SetPartyTagId(targetIndex, 2, snapshot.tagId3);
-        }
-
-        private static int RemapPartyIndexForRunoff(
-            ref ElectionState state,
-            int originalPartyIndex,
-            int firstOriginalIndex,
-            int secondOriginalIndex,
-            PartySlotSnapshot[] partySnapshots,
-            ref int preservationSlot)
-        {
-            if (!ElectionState.IsPartyIndex(originalPartyIndex))
-                return -1;
-
-            if (originalPartyIndex == firstOriginalIndex)
-                return 0;
-
-            if (originalPartyIndex == secondOriginalIndex)
-                return 1;
-
-            while (preservationSlot < ElectionState.MaxCandidateCount)
-            {
-                int slot = preservationSlot++;
-                if (slot == 0 || slot == 1)
-                    continue;
-
-                CopyPartySlot(ref state, slot, partySnapshots[originalPartyIndex]);
-                return slot;
-            }
-
-            return originalPartyIndex;
         }
 
         private static void RemapMayorEndorsementForRunoff(ref ElectionState state, int originalEndorsementIndex, Entity originalEndorsementCandidate, int firstOriginalIndex, int secondOriginalIndex)
@@ -6033,7 +6019,7 @@ namespace Elections.Systems
             state.pendingMayorEffectId = effectId;
             state.pendingMayorTagId = tagId;
             state.pendingMayorNegativeSoftened = negativeSoftened;
-            state.pendingMayorPartyIndex = ArePartiesEnabled() ? winnerIndex : -1;
+            state.pendingMayorPartyIndex = ArePartiesEnabled() ? state.GetCandidatePartyIndex(winnerIndex) : -1;
             state.pendingMayorTermYear = state.mayorTermYear;
             state.pendingMayorInaugurated = false;
         }
@@ -6882,7 +6868,7 @@ namespace Elections.Systems
             using (NativeArray<Entity> entities = m_CandidateQuery.ToEntityArray(Allocator.Temp))
             using (NativeArray<Citizen> citizens = m_CandidateQuery.ToComponentDataArray<Citizen>(Allocator.Temp))
             {
-                List<PollSampleCandidate> eligibleCandidates = new List<PollSampleCandidate>(math.min(entities.Length, targetSampleCount));
+                List<PollSampleCandidate> sampleCandidates = new List<PollSampleCandidate>(math.min(entities.Length, targetSampleCount));
                 for (int i = 0; i < entities.Length; i++)
                 {
                     if (!ElectionUtility.IsEligibleVoterResident(EntityManager, entities[i], citizens[i]))
@@ -6896,19 +6882,18 @@ namespace Elections.Systems
                         adultDailyTurnout,
                         elderlyDailyTurnout);
                     float draw = math.max(0.000001f, random.NextFloat());
-                    eligibleCandidates.Add(new PollSampleCandidate
+                    eligibleCount++;
+                    AddPollSampleCandidate(sampleCandidates, new PollSampleCandidate
                     {
                         citizenIndex = i,
                         priority = (float)(-Math.Log(draw) / turnoutWeight)
-                    });
+                    }, targetSampleCount);
                 }
 
-                eligibleCount = eligibleCandidates.Count;
-                sampleCount = math.min(targetSampleCount, eligibleCount);
-                eligibleCandidates.Sort((left, right) => left.priority.CompareTo(right.priority));
+                sampleCount = sampleCandidates.Count;
                 for (int i = 0; i < sampleCount; i++)
                 {
-                    int citizenIndex = eligibleCandidates[i].citizenIndex;
+                    int citizenIndex = sampleCandidates[i].citizenIndex;
 
                     float undecidedChance = ElectionUtility.GetUndecidedProbability(EntityManager, entities[citizenIndex], citizens[citizenIndex], state);
                     int decision;
@@ -6931,6 +6916,60 @@ namespace Elections.Systems
 
             ApplyPollUndecidedFloor(ref state, sampleCount);
             DebugLog($"Poll simulation complete: date={ElectionUtility.FormatCurrentDate(World, now)}, population={population}, sampleRule=goodPoll(min={kGoodPollMinimumSampleCount}, populationShare=1/{kGoodPollPopulationShareDivisor}), targetSample={targetSampleCount}, eligibleResidents={eligibleCount}, actualSample={sampleCount}, seed={seed}, turnoutWeightByAge=teen:{teenDailyTurnout}/adult:{adultDailyTurnout}/elderly:{elderlyDailyTurnout}, pollVotes={FormatPollVoteTotals(state)}, undecided={state.pollUndecided}, donations={FormatDonationTotals(state)}.");
+        }
+
+        private static void AddPollSampleCandidate(List<PollSampleCandidate> heap, PollSampleCandidate candidate, int maxCount)
+        {
+            if (maxCount <= 0)
+                return;
+
+            if (heap.Count < maxCount)
+            {
+                heap.Add(candidate);
+                SiftPollSampleUp(heap, heap.Count - 1);
+                return;
+            }
+
+            if (heap.Count == 0 || candidate.priority >= heap[0].priority)
+                return;
+
+            heap[0] = candidate;
+            SiftPollSampleDown(heap, 0);
+        }
+
+        private static void SiftPollSampleUp(List<PollSampleCandidate> heap, int index)
+        {
+            while (index > 0)
+            {
+                int parent = (index - 1) / 2;
+                if (heap[parent].priority >= heap[index].priority)
+                    return;
+
+                PollSampleCandidate value = heap[parent];
+                heap[parent] = heap[index];
+                heap[index] = value;
+                index = parent;
+            }
+        }
+
+        private static void SiftPollSampleDown(List<PollSampleCandidate> heap, int index)
+        {
+            while (true)
+            {
+                int left = index * 2 + 1;
+                if (left >= heap.Count)
+                    return;
+
+                int right = left + 1;
+                int largest = right < heap.Count && heap[right].priority > heap[left].priority ? right : left;
+                if (heap[index].priority >= heap[largest].priority)
+                    return;
+
+                PollSampleCandidate value = heap[index];
+                heap[index] = heap[largest];
+                heap[largest] = value;
+                index = largest;
+            }
         }
 
         private static int GetGoodPollTargetSampleCount(int population)

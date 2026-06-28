@@ -95,6 +95,11 @@ namespace Elections.Systems
             return GetPortraitImageSource(GetPortraitFileName(entityManager, candidate, portraitIndex));
         }
 
+        public static string GetPortraitUiImageSource(EntityManager entityManager, Entity candidate, int portraitIndex)
+        {
+            return GetPortraitFileSource(GetPortraitFileName(entityManager, candidate, portraitIndex));
+        }
+
         public static string GetPortraitFileName(EntityManager entityManager, Entity candidate, int portraitIndex)
         {
             portraitIndex = NormalizePortraitIndex(portraitIndex);
@@ -187,6 +192,11 @@ namespace Elections.Systems
             if (TryGetDataUri(fileName, out string dataUri))
                 return dataUri;
 
+            return GetPortraitFileSource(fileName);
+        }
+
+        private static string GetPortraitFileSource(string fileName)
+        {
             return $"{FallbackSourceRoot}{fileName}";
         }
 

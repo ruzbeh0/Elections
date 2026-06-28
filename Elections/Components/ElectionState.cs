@@ -17,8 +17,8 @@ namespace Elections.Components
     {
         // Keep the state marker lower than unpublished layout churn while still mapping it to
         // the current field layout below. Known published/committed layouts include 17, 19, and 22.
-        public const int CurrentVersion = 24;
-        private const int CurrentSerializedLayoutVersion = 32;
+        public const int CurrentVersion = 25;
+        private const int CurrentSerializedLayoutVersion = 33;
         public const int MinCandidateCount = 2;
         public const int DefaultCandidateCount = 2;
         public const int MaxCandidateCount = 4;
@@ -51,6 +51,10 @@ namespace Elections.Components
         public bool pendingMayorInaugurated;
 
         public int candidateCount;
+        public int candidateAPartyIndex;
+        public int candidateBPartyIndex;
+        public int candidateCPartyIndex;
+        public int candidateDPartyIndex;
         public FixedString64Bytes partyAName;
         public FixedString64Bytes partyBName;
         public FixedString64Bytes partyCName;
@@ -418,7 +422,53 @@ namespace Elections.Components
 
         public int GetCandidatePartyIndex(int candidateIndex)
         {
-            return IsCandidateIndex(candidateIndex) ? candidateIndex : -1;
+            if (!IsCandidateIndex(candidateIndex))
+                return -1;
+
+            int partyIndex;
+            switch (candidateIndex)
+            {
+                case 0:
+                    partyIndex = candidateAPartyIndex;
+                    break;
+                case 1:
+                    partyIndex = candidateBPartyIndex;
+                    break;
+                case 2:
+                    partyIndex = candidateCPartyIndex;
+                    break;
+                case 3:
+                    partyIndex = candidateDPartyIndex;
+                    break;
+                default:
+                    partyIndex = -1;
+                    break;
+            }
+
+            return IsPartyIndex(partyIndex) ? partyIndex : candidateIndex;
+        }
+
+        public void SetCandidatePartyIndex(int candidateIndex, int partyIndex)
+        {
+            if (!IsCandidateIndex(candidateIndex))
+                return;
+
+            partyIndex = IsPartyIndex(partyIndex) ? partyIndex : candidateIndex;
+            switch (candidateIndex)
+            {
+                case 0:
+                    candidateAPartyIndex = partyIndex;
+                    break;
+                case 1:
+                    candidateBPartyIndex = partyIndex;
+                    break;
+                case 2:
+                    candidateCPartyIndex = partyIndex;
+                    break;
+                case 3:
+                    candidateDPartyIndex = partyIndex;
+                    break;
+            }
         }
 
         public string GetPartyName(int index)
@@ -1987,6 +2037,10 @@ namespace Elections.Components
             writer.Write(pendingMayorTermYear);
             writer.Write(pendingMayorInaugurated);
             writer.Write(democraticTransitionCompleted);
+            writer.Write(candidateAPartyIndex);
+            writer.Write(candidateBPartyIndex);
+            writer.Write(candidateCPartyIndex);
+            writer.Write(candidateDPartyIndex);
         }
 
         public void Deserialize<TReader>(TReader reader) where TReader : IReader
@@ -2710,10 +2764,23 @@ namespace Elections.Components
                         (voteArrivals > 0 || votesA + votesB + votesC + votesD > 0));
             }
 
+            if (layoutVersion >= 33)
+            {
+                reader.Read(out candidateAPartyIndex);
+                reader.Read(out candidateBPartyIndex);
+                reader.Read(out candidateCPartyIndex);
+                reader.Read(out candidateDPartyIndex);
+            }
+            else
+            {
+                ResetCandidatePartyIndexes();
+            }
+
             strictVotingIdLawPassed = HasLegislation(ElectionLegislationType.VoterIdentification);
 
             candidateCount = NormalizeCandidateCount(candidateCount <= 0 ? DefaultCandidateCount : candidateCount);
             runoffOriginalCandidateCount = runoffOriginalCandidateCount <= 0 ? candidateCount : NormalizeCandidateCount(runoffOriginalCandidateCount);
+            NormalizeCandidatePartyIndexes();
             if (pendingMayor == Entity.Null)
             {
                 pendingMayorCandidateIndex = -1;
@@ -2769,6 +2836,20 @@ namespace Elections.Components
             appliedEffectPartySignature = 0;
         }
 
+        private void ResetCandidatePartyIndexes()
+        {
+            candidateAPartyIndex = 0;
+            candidateBPartyIndex = 1;
+            candidateCPartyIndex = 2;
+            candidateDPartyIndex = 3;
+        }
+
+        private void NormalizeCandidatePartyIndexes()
+        {
+            for (int i = 0; i < MaxCandidateCount; i++)
+                SetCandidatePartyIndex(i, GetCandidatePartyIndex(i));
+        }
+
         private void ClearIncomePollBreakdown()
         {
             pollIncome0VotesA = 0;
@@ -2792,6 +2873,8 @@ namespace Elections.Components
         {
             candidateC = Entity.Null;
             candidateD = Entity.Null;
+            candidateCPartyIndex = 2;
+            candidateDPartyIndex = 3;
             candidateCEffectId = 0;
             candidateDEffectId = 0;
             candidateCAge = 0;
@@ -2877,6 +2960,9 @@ namespace Elections.Components
 
             if (serializedVersion == 23)
                 return 31;
+
+            if (serializedVersion == 24)
+                return 32;
 
             if (serializedVersion == CurrentVersion)
                 return CurrentSerializedLayoutVersion;

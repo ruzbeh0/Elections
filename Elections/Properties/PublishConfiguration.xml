@@ -42,7 +42,7 @@ Elections adds a mayoral election cycle to the city. Residents can become candid
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/elections-mod.1927087/" />
 	<!--Version of the mod-->
-	<ModVersion Value="0.3.2" />
+	<ModVersion Value="0.3.3" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times-->
@@ -55,6 +55,9 @@ Elections adds a mayoral election cycle to the city. Residents can become candid
 * Fixed existing elected mayors being replaced by a new democratic transition mayor at the start of a new cycle.
 * Fixed the mayor City Hall job assignment loop where the mayor could be repeatedly employed and immediately unemployed.
 * Fixed party trait changes so saved tag selections persist correctly outside election cycles.
+* Fixed runoff party slot handling so parties no longer duplicate or replace one another.
+* Improved election UI performance by caching portrait paths and reducing unnecessary updates.
+* Reduced election-day performance spikes by batching voting trip scans and limiting poll sampling work.
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
 	<ExternalLink Type="github" Url="https://github.com/ruzbeh0/Elections" />
